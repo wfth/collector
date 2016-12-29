@@ -43,7 +43,7 @@ def extract_data(scripture, series, sermon, base_path)
   compile_sermon_metadata(sermon, base_path + "/#{sermon.search(".sermon_title").text}")
 
   puts "Downloading sermon audio..."
-  #download_audio(sermon, base_path + "/#{sermon.search(".sermon_title").text}")
+  download_audio(sermon, base_path + "/#{sermon.search(".sermon_title").text}")
 
   puts "Finished!"
 end
@@ -64,7 +64,6 @@ end
 
 def download_graphic(series, path)
   graphic = series.search(".series_graphic img")[0]
-  pp graphic
   if graphic
     $agent.get(graphic.attribute("src")).save(path + "/Graphic.jpg")
   end
