@@ -29,6 +29,7 @@ def main
       download_graphic(series, series_base_path)
       
       for sermon in series.search(".series_links > ul > li")
+        puts "Extracting " + sermon.search(".sermon_title").text + "..."
         extract_data(scripture, series, sermon, series_base_path)
       end
     end
