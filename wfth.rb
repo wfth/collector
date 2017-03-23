@@ -29,6 +29,9 @@ def main
                  series_metadata["date"])
       series_id = `sqlite3 wfth.db "select series_id from sermon_series order by series_id desc limit 1;"`.to_i
 
+      graphic_url = upload_graphic("series/#{series_id}/graphic.jpg", series)
+      db.execute("update sermon_series set graphic_url = '#{graphic_url}' where series_id = #{series_id}")
+
       for sermon in series.search(".series_links > ul > li")
         sermon_metadata = compile_sermon_metadata(sermon)
 
@@ -105,14 +108,17 @@ end
 #   end
 # end
 
-# TODO: upload graphic to S3 and return url
+def upload_graphic(object_key, series)
+  graphic = series.search(".series_graphic img")[0]
+  if graphic
+    graphic_file = $agent.get(graphic.attribute("src"))
+    graphic_file.save("/tmp/graphic.jpg")
+    key = upload_file(object_key, "/tmp/graphic.jpg")
+    FileUtils.rm("/tmp/graphic.jpg")
 
-# def download_graphic(series, path)
-#   graphic = series.search(".series_graphic img")[0]
-#   if graphic
-#     $agent.get(graphic.attribute("src")).save(path + "/Graphic.jpg")
-#   end
-# end
+    return key
+  end
+end
 
 def compile_series_metadata(series)
   metadata = {
