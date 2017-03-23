@@ -11,9 +11,8 @@ require 'fileutils'
 $agent = Mechanize.new
 
 def main
-  setup_aws()
-  db = SQLite3::Database.new("wfth.db")
-  create_db_tables(db)
+  setup_aws
+  db = create_db
 
   messages_page = $agent.get("http://www.wisdomonline.org/media/messages")
   scripture_links = messages_page.search("div#scripture li a")
@@ -24,22 +23,21 @@ def main
     for series in scripture_page.search(".series_list > li")
       series_metadata = compile_series_metadata(series)
 
-      db.execute("insert into sermon_series (title, description, released_on, graphic_url) values (?, ?, ?, ?)",
+      db.execute("insert into sermon_series (title, description, released_on) values (?, ?, ?)",
                  series_metadata["title"],
                  series_metadata["description"],
-                 series_metadata["date"],
-                 "nothing right now")
+                 series_metadata["date"])
       series_id = `sqlite3 wfth.db "select series_id from sermon_series order by series_id desc limit 1;"`.to_i
 
       for sermon in series.search(".series_links > ul > li")
         sermon_metadata = compile_sermon_metadata(sermon)
-        db.execute("insert into sermons (title, passage, sermon_series_id, audio_url, transcript_url) values (?, ?, ?, ?, ?)",
+
+        db.execute("insert into sermons (title, passage, sermon_series_id) values (?, ?, ?)",
                     sermon_metadata["title"],
                     sermon_metadata["passage"],
-                    series_id,
-                    "nothing right now",
-                    "nothing right now")
+                    series_id)
         sermon_id = `sqlite3 wfth.db "select sermon_id from sermons order by sermon_id desc limit 1;"`.to_i
+
         transcript_url = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
         db.execute("update sermons set transcript_url = '#{transcript_url}' where sermon_id is #{sermon_id}")
       end
@@ -59,9 +57,12 @@ def upload_file(object_key, file_path)
   return obj.key
 end
 
-def create_db_tables(db)
+def create_db
+  `> wfth.db` # Wipe wfth.db of all data, if it exists
+  db = SQLite3::Database.new("wfth.db")
+
   db.execute <<-SQL
-    create table if not exists sermon_series (
+    create table sermon_series (
       series_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       description TEXT,
@@ -71,7 +72,7 @@ def create_db_tables(db)
   SQL
 
   db.execute <<-SQL
-    create table if not exists sermons (
+    create table sermons (
       sermon_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       passage TEXT,
@@ -80,6 +81,8 @@ def create_db_tables(db)
       transcript_url TEXT
     );
   SQL
+
+  return db
 end
 
 def upload_transcript(object_key, sermon)
