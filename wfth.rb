@@ -70,7 +70,7 @@ def create_db
       title TEXT NOT NULL,
       description TEXT,
       released_on TEXT,
-      graphic_url TEXT
+      graphic_key TEXT
     );
   SQL
 
@@ -80,8 +80,8 @@ def create_db
       title TEXT NOT NULL,
       passage TEXT,
       sermon_series_id INTEGER NOT NULL,
-      audio_url TEXT,
-      transcript_url TEXT
+      audio_key TEXT,
+      transcript_key TEXT
     );
   SQL
 
