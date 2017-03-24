@@ -132,10 +132,6 @@ def compile_series_metadata(series)
     "description" => series.search(".description p").text
   }
 
-  if series.search(".link-buy-series")[0]
-    metadata["buy_link"] = series.search(".link-buy-series")[0].attributes["href"].text
-  end
-
   return metadata
 end
 
@@ -149,10 +145,6 @@ def compile_sermon_metadata(sermon)
     "title" => sermon_title,
     "passage" => sermon.search(".sermon_title").text[/(?<=- ).+/]
   }
-
-  if sermon.search(".buy_single a")[0]
-    metadata["buy_link"] = sermon.search(".buy_single a").attribute("href").text
-  end
 
   return metadata
 end
