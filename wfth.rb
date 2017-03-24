@@ -29,8 +29,8 @@ def main
                  series_metadata["date"])
       series_id = `sqlite3 wfth.db "select series_id from sermon_series order by series_id desc limit 1;"`.to_i
 
-      graphic_url = upload_graphic("series/#{series_id}/graphic.jpg", series)
-      db.execute("update sermon_series set graphic_url = '#{graphic_url}' where series_id = #{series_id}")
+      graphic_key = upload_graphic("series/#{series_id}/graphic.jpg", series)
+      db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
 
       for sermon in series.search(".series_links > ul > li")
         sermon_metadata = compile_sermon_metadata(sermon)
@@ -41,8 +41,11 @@ def main
                     series_id)
         sermon_id = `sqlite3 wfth.db "select sermon_id from sermons order by sermon_id desc limit 1;"`.to_i
 
-        transcript_url = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
-        db.execute("update sermons set transcript_url = '#{transcript_url}' where sermon_id is #{sermon_id}")
+        transcript_key = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
+        db.execute("update sermons set transcript_key = '#{transcript_key}' where sermon_id is #{sermon_id}")
+
+        audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
+        db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
       end
     end
   end
@@ -99,14 +102,16 @@ def upload_transcript(object_key, sermon)
   end
 end
 
-# TODO: upload audio to S3 and return url
+def upload_audio(object_key, sermon)
+  if sermon.search(".audio a")[0]
+    audio = $agent.click(sermon.search(".audio a")[0])
+    audio.save("/tmp/audio.mp3")
+    key = upload_file(object_key, "/tmp/audio.mp3")
+    FileUtils.rm("/tmp/audio.mp3")
 
-# def download_audio(sermon, path)
-#   if sermon.search(".audio a")[0]
-#     audio = $agent.click(sermon.search(".audio a")[0])
-#     audio.save(path + "/Audio.mp3")
-#   end
-# end
+    return key
+  end
+end
 
 def upload_graphic(object_key, series)
   graphic = series.search(".series_graphic img")[0]
