@@ -6,17 +6,14 @@ require 'json'
 require 'aws-sdk'
 require 'fileutils'
 
-$agent = Mechanize.new
-
 def main
   setup_aws
-  create_db
 
-  messages_page = $agent.get("http://www.wisdomonline.org/media/messages")
+  messages_page = agent.get("http://www.wisdomonline.org/media/messages")
   scripture_links = messages_page.search("div#scripture li a")
 
   for scripture in scripture_links
-    scripture_page = $agent.click(scripture)
+    scripture_page = agent.click(scripture)
 
     for series in scripture_page.search(".series_list > li")
       series_id = insert_series(series)
@@ -32,43 +29,51 @@ def setup_aws
   Aws.config[:credentials] = Aws::Credentials.new(ENV['WFTH_PERMISSIONS_AWS_ACCESS_KEY'], ENV['WFTH_PERMISSIONS_AWS_ACCESS_SECRET'])
 end
 
-def create_db
-  `> wfth.db` # Wipe wfth.db of all data, if it exists
-  $db = SQLite3::Database.new("wfth.db")
+def agent
+  @agent ||= Mechanize.new
+end
 
-  $db.execute <<-SQL
-    create table sermon_series (
-      series_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      description TEXT,
-      released_on TEXT,
-      graphic_key TEXT
-    );
-  SQL
+def db
+  unless @db
+    `> wfth.db` # Wipe wfth.db of all data, if it exists
+    @db = SQLite3::Database.new("wfth.db")
 
-  $db.execute <<-SQL
-    create table sermons (
-      sermon_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      passage TEXT,
-      sermon_series_id INTEGER NOT NULL,
-      audio_key TEXT,
-      transcript_key TEXT
-    );
-  SQL
+    @db.execute <<-SQL
+      create table sermon_series (
+        series_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT,
+        released_on TEXT,
+        graphic_key TEXT
+      );
+    SQL
+
+    @db.execute <<-SQL
+      create table sermons (
+        sermon_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        passage TEXT,
+        sermon_series_id INTEGER NOT NULL,
+        audio_key TEXT,
+        transcript_key TEXT
+      );
+    SQL
+  end
+
+  return @db
 end
 
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
 
-  $db.execute("insert into sermon_series (title, description, released_on) values (?, ?, ?)",
+  db.execute("insert into sermon_series (title, description, released_on) values (?, ?, ?)",
              series_metadata["title"],
              series_metadata["description"],
              series_metadata["date"])
   series_id = `sqlite3 wfth.db "select series_id from sermon_series order by series_id desc limit 1;"`.to_i
 
   graphic_key = upload_graphic("series/#{series_id}/graphic.jpg", series)
-  $db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
+  db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
 
   return series_id
 end
@@ -76,17 +81,17 @@ end
 def insert_sermon(sermon, series_id)
   sermon_metadata = compile_sermon_metadata(sermon)
 
-  $db.execute("insert into sermons (title, passage, sermon_series_id) values (?, ?, ?)",
+  db.execute("insert into sermons (title, passage, sermon_series_id) values (?, ?, ?)",
              sermon_metadata["title"],
              sermon_metadata["passage"],
              series_id)
   sermon_id = `sqlite3 wfth.db "select sermon_id from sermons order by sermon_id desc limit 1;"`.to_i
 
   transcript_key = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
-  $db.execute("update sermons set transcript_key = '#{transcript_key}' where sermon_id is #{sermon_id}")
+  db.execute("update sermons set transcript_key = '#{transcript_key}' where sermon_id is #{sermon_id}")
 
   audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
-  $db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
+  db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
 end
 
 def compile_series_metadata(series)
@@ -115,7 +120,7 @@ end
 
 def upload_transcript(object_key, sermon)
   if sermon.search(".transcript a")[0]
-    transcript = $agent.click(sermon.search(".transcript a")[0])
+    transcript = agent.click(sermon.search(".transcript a")[0])
     transcript.save("/tmp/transcript.pdf")
     key = upload_file(object_key, "/tmp/transcript.pdf")
     FileUtils.rm("/tmp/transcript.pdf")
@@ -126,7 +131,7 @@ end
 
 def upload_audio(object_key, sermon)
   if sermon.search(".audio a")[0]
-    audio = $agent.click(sermon.search(".audio a")[0])
+    audio = agent.click(sermon.search(".audio a")[0])
     audio.save("/tmp/audio.mp3")
     key = upload_file(object_key, "/tmp/audio.mp3")
     FileUtils.rm("/tmp/audio.mp3")
@@ -138,7 +143,7 @@ end
 def upload_graphic(object_key, series)
   graphic = series.search(".series_graphic img")[0]
   if graphic
-    graphic_file = $agent.get(graphic.attribute("src"))
+    graphic_file = agent.get(graphic.attribute("src"))
     graphic_file.save("/tmp/graphic.jpg")
     key = upload_file(object_key, "/tmp/graphic.jpg")
     FileUtils.rm("/tmp/graphic.jpg")
