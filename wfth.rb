@@ -5,21 +5,38 @@ require 'sqlite3'
 require 'json'
 require 'aws-sdk'
 require 'fileutils'
+require_relative 'spinner'
 
 def main
   setup_aws
 
+  puts "Loading messages"
   messages_page = agent.get("http://www.wisdomonline.org/media/messages")
   scripture_links = messages_page.search("div#scripture li a")
 
-  for scripture in scripture_links
+  scripture_links.each do |scripture|
     scripture_page = agent.click(scripture)
+    series_collection = scripture_page.search(".series_list > li")
 
-    for series in scripture_page.search(".series_list > li")
+    series_collection.each do |series|
+      puts "Starting a new series"
+
       series_id = insert_series(series)
+      sermons = series.search(".series_links > ul > li")
 
-      for sermon in series.search(".series_links > ul > li")
+      sermons.each_with_index do |sermon, index|
+        puts "Starting a new sermon"
+
+        percentage = ((index.to_f / sermons.length) * 100).to_i
+        print "Progress: #{index}/#{sermons.length} (#{percentage}%) "
+
+        spinner = Spinner.new(10)
+        spinner.start
+
         insert_sermon(sermon, series_id)
+
+        spinner.stop
+        print "\b"*22
       end
     end
   end
