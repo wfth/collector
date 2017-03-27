@@ -70,7 +70,7 @@ def insert_series(series)
              series_metadata["title"],
              series_metadata["description"],
              series_metadata["date"])
-  series_id = `sqlite3 wfth.db "select series_id from sermon_series order by series_id desc limit 1;"`.to_i
+  series_id = db.last_insert_row_id
 
   graphic_key = upload_graphic("series/#{series_id}/graphic.jpg", series)
   db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
@@ -85,7 +85,7 @@ def insert_sermon(sermon, series_id)
              sermon_metadata["title"],
              sermon_metadata["passage"],
              series_id)
-  sermon_id = `sqlite3 wfth.db "select sermon_id from sermons order by sermon_id desc limit 1;"`.to_i
+  sermon_id = db.last_insert_row_id
 
   transcript_key = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
   db.execute("update sermons set transcript_key = '#{transcript_key}' where sermon_id is #{sermon_id}")
