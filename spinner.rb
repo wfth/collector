@@ -1,14 +1,14 @@
 class Spinner
   def initialize(fps)
     @delay = 1.0/fps.to_f
-    @pinwheel = %w{ | / - \\ }
+    @frames = %w{ | / - \\ }
     @iter = 0
   end
 
   def start
     @spinner = Thread.new do
       while @iter do
-        print @pinwheel[(@iter+=1) % @pinwheel.length]
+        print @frames[(@iter+=1) % @frames.length]
         sleep @delay
         print "\b"
       end
