@@ -5,7 +5,7 @@ require 'sqlite3'
 require 'json'
 require 'aws-sdk'
 require 'fileutils'
-require_relative 'spinner'
+require 'beachball'
 
 def main
   setup_aws
@@ -30,12 +30,12 @@ def main
         percentage = ((index.to_f / sermons.length) * 100).to_i
         print "Progress: #{index}/#{sermons.length} (#{percentage}%) "
 
-        spinner = Spinner.new(10)
-        spinner.start
+        beachball = Beachball.new(10)
+        beachball.start
 
         insert_sermon(sermon, series_id)
 
-        spinner.stop
+        beachball.stop
         print "\b"*22
       end
     end
