@@ -19,12 +19,24 @@ def main
     series_collection = scripture_page.search(".series_list > li")
 
     series_collection.each do |series|
+      status = series_status(series)
+      if status == :completed
+        next
+      elsif status == :unfinished
+        series_id = db.execute("select series_id from sermon_series where title = ?", series_title(series)).flatten[0].to_i
+      elsif status == :untouched
+        series_id = insert_series(series)
+      end
+
       puts "Starting a new series"
 
-      series_id = insert_series(series)
       sermons = series.search(".series_links > ul > li")
 
       sermons.each_with_index do |sermon, index|
+        if sermon_completed?(sermon)
+          next
+        end
+
         puts "Starting a new sermon"
 
         percentage = ((index.to_f / sermons.length) * 100).to_i
@@ -42,6 +54,31 @@ def main
   end
 end
 
+def series_status(series)
+  sermons = series.search(".series_links > ul > li")
+  sermons.each_with_index do |sermon, index|
+    sermon_object = db.execute("select * from sermons where title = ?", sermon_title(sermon)).flatten.first
+    if sermon_object == nil
+      if index == 0
+        return :untouched
+      else
+        return :unfinished
+      end
+    end
+  end
+
+  return :completed
+end
+
+def sermon_completed?(sermon)
+  sermon_object = db.execute("select * from sermons where title = ?", sermon_title(sermon)).flatten.first
+  if sermon_object != nil
+    return true
+  else
+    return false
+  end
+end
+
 def setup_aws
   Aws.config[:credentials] = Aws::Credentials.new(ENV['WFTH_PERMISSIONS_AWS_ACCESS_KEY'], ENV['WFTH_PERMISSIONS_AWS_ACCESS_SECRET'])
 end
@@ -52,11 +89,10 @@ end
 
 def db
   unless @db
-    `> wfth.db` # Wipe wfth.db of all data, if it exists
     @db = SQLite3::Database.new("wfth.db")
 
     @db.execute <<-SQL
-      create table sermon_series (
+      create table if not exists sermon_series (
         series_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
@@ -66,7 +102,7 @@ def db
     SQL
 
     @db.execute <<-SQL
-      create table sermons (
+      create table if not exists sermons (
         sermon_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         passage TEXT,
@@ -78,6 +114,16 @@ def db
   end
 
   return @db
+end
+
+def series_title(series)
+  series_metadata = compile_series_metadata(series)
+  return series_metadata["title"]
+end
+
+def sermon_title(sermon)
+  sermon_metadata = compile_sermon_metadata(sermon)
+  return sermon_metadata["title"]
 end
 
 def insert_series(series)
