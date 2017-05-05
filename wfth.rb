@@ -20,11 +20,11 @@ def main
 
     series_collection.each do |series|
       status = series_status(series)
-      if status == :completed
+      if status == :complete
         next
-      elsif status == :unfinished
+      elsif status == :incomplete
         series_id = db.execute("select series_id from sermon_series where title = ?", series_title(series)).flatten[0].to_i
-      elsif status == :untouched
+      elsif status == :nonexistent
         series_id = insert_series(series)
       end
 
@@ -33,8 +33,10 @@ def main
       sermons = series.search(".series_links > ul > li")
 
       sermons.each_with_index do |sermon, index|
-        if sermon_completed?(sermon)
+        if sermon_status(sermon) == :complete
           next
+        elsif sermon_status(sermon) == :incomplete
+          delete_sermon(sermon)
         end
 
         puts "Starting a new sermon"
@@ -60,22 +62,25 @@ def series_status(series)
     sermon_object = db.execute("select * from sermons where title = ?", sermon_title(sermon)).flatten.first
     if sermon_object == nil
       if index == 0
-        return :untouched
+        return :nonexistent
       else
-        return :unfinished
+        return :incomplete
       end
     end
   end
 
-  return :completed
+  return :complete
 end
 
-def sermon_completed?(sermon)
-  sermon_object = db.execute("select * from sermons where title = ?", sermon_title(sermon)).flatten.first
-  if sermon_object != nil
-    return true
+def sermon_status(sermon)
+  sermon_object = db.execute("select audio_key, transcript_key from sermons where title = ?", sermon_title(sermon)).flatten
+
+  if sermon_object != [] && sermon_object.all?
+    return :complete
+  elsif sermon_object != [] && !sermon_object.all?
+    return :incomplete
   else
-    return false
+    return :nonexistent
   end
 end
 
@@ -155,6 +160,11 @@ def insert_sermon(sermon, series_id)
 
   audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
   db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
+end
+
+def delete_sermon(sermon)
+  sermon_metadata = compile_sermon_metadata(sermon)
+  db.execute("delete from sermons where sermon_id = ( select sermon_id from sermons where title = '#{sermon_metadata["title"]}' order by sermon_id limit 1 )")
 end
 
 def compile_series_metadata(series)
