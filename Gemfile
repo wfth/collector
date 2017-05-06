@@ -5,3 +5,4 @@ gem "mechanize"
 gem "sqlite3"
 gem 'aws-sdk', '~> 2'
 gem 'beachball'
+gem 'shopify_api'

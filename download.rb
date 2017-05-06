@@ -1,5 +1,6 @@
+$LOAD_PATH.unshift(".")
+
 require 'pp'
-require 'rubygems'
 require 'mechanize'
 require 'sqlite3'
 require 'json'
@@ -19,40 +20,44 @@ def main
     series_collection = scripture_page.search(".series_list > li")
 
     series_collection.each do |series|
-      status = series_status(series)
-      if status == :complete
-        next
-      elsif status == :incomplete
-        series_id = db.execute("select series_id from sermon_series where title = ?", series_title(series)).flatten[0].to_i
-      elsif status == :nonexistent
-        series_id = insert_series(series)
-      end
-
-      puts "Starting a new series"
-
-      sermons = series.search(".series_links > ul > li")
-
-      sermons.each_with_index do |sermon, index|
-        if sermon_status(sermon) == :complete
-          next
-        elsif sermon_status(sermon) == :incomplete
-          delete_sermon(sermon)
-        end
-
-        puts "Starting a new sermon"
-
-        percentage = ((index.to_f / sermons.length) * 100).to_i
-        print "Progress: #{index}/#{sermons.length} (#{percentage}%) "
-
-        beachball = Beachball.new(10)
-        beachball.start
-
-        insert_sermon(sermon, series_id)
-
-        beachball.stop
-        print "\b"*22
+      case series_status(series)
+      when :incomplete
+        collect_series_sermons(series, find_series_id(series_title(series)))
+      when :nonexistent
+        collect_series_sermons(series, insert_series(series))
       end
     end
+  end
+end
+
+def find_series_id(title)
+  db.execute("select series_id from sermon_series where title = ?", title).flatten[0].to_i
+end
+
+def collect_series_sermons(series, series_id)
+  puts "Starting a new series"
+
+  sermons = series.search(".series_links > ul > li")
+
+  sermons.each_with_index do |sermon, index|
+    if sermon_status(sermon) == :complete
+      next
+    elsif sermon_status(sermon) == :incomplete
+      delete_sermon(sermon)
+    end
+
+    puts "Starting a new sermon"
+
+    percentage = ((index.to_f / sermons.length) * 100).to_i
+    print "Progress: #{index}/#{sermons.length} (#{percentage}%) "
+
+    beachball = Beachball.new(10)
+    beachball.start
+
+    insert_sermon(sermon, series_id)
+
+    beachball.stop
+    print "\b"*22
   end
 end
 
