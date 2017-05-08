@@ -107,7 +107,8 @@ def db
         title TEXT NOT NULL,
         description TEXT,
         released_on TEXT,
-        graphic_key TEXT
+        graphic_key TEXT,
+        buy_graphic_key TEXT
       );
     SQL
 
@@ -118,7 +119,8 @@ def db
         passage TEXT,
         sermon_series_id INTEGER NOT NULL,
         audio_key TEXT,
-        transcript_key TEXT
+        transcript_key TEXT,
+        buy_graphic_key TEXT
       );
     SQL
   end
@@ -145,8 +147,11 @@ def insert_series(series)
              series_metadata["date"])
   series_id = db.last_insert_row_id
 
-  graphic_key = upload_graphic("series/#{series_id}/graphic.jpg", series)
+  graphic_key = upload_series_graphic("series/#{series_id}/graphic.jpg", series)
   db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
+
+  buy_graphic_key = upload_series_buy_graphic("series/#{series_id}/buy_graphic.jpg", series)
+  db.execute("update sermon_series set buy_graphic_key = '#{buy_graphic_key}' where series_id = #{series_id}")
 
   return series_id
 end
@@ -165,6 +170,9 @@ def insert_sermon(sermon, series_id)
 
   audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
   db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
+
+  buy_graphic_key = upload_sermon_buy_graphic("series/#{series_id}/sermons/#{sermon_id}/buy_graphic.jpg", sermon)
+  db.execute("update sermons set buy_graphic_key = '#{buy_graphic_key}' where sermon_id is #{sermon_id}")
 end
 
 def delete_sermon(sermon)
@@ -197,34 +205,74 @@ def compile_sermon_metadata(sermon)
 end
 
 def upload_transcript(object_key, sermon)
-  if sermon.search(".transcript a")[0]
-    transcript = agent.click(sermon.search(".transcript a")[0])
-    transcript.save("/tmp/transcript.pdf")
-    key = upload_file(object_key, "/tmp/transcript.pdf")
-    FileUtils.rm("/tmp/transcript.pdf")
+  transcript_link = sermon.search(".transcript a")[0]
+  if transcript_link
+    transcript = agent.click(transcript_link)
+
+    tmp_file_path = "/tmp/transcript.pdf"
+    transcript.save(tmp_file_path)
+    key = upload_file(object_key, tmp_file_path)
+    FileUtils.rm(tmp_file_path)
 
     return key
   end
 end
 
 def upload_audio(object_key, sermon)
-  if sermon.search(".audio a")[0]
-    audio = agent.click(sermon.search(".audio a")[0])
-    audio.save("/tmp/audio.mp3")
-    key = upload_file(object_key, "/tmp/audio.mp3")
-    FileUtils.rm("/tmp/audio.mp3")
+  audio_link = sermon.search(".audio a")[0]
+  if audio_link
+    audio = agent.click(audio_link)
+
+    tmp_file_path = "/tmp/audio.mp3"
+    audio.save(tmp_file_path)
+    key = upload_file(object_key, tmp_file_path)
+    FileUtils.rm(tmp_file_path)
 
     return key
   end
 end
 
-def upload_graphic(object_key, series)
+def upload_sermon_buy_graphic(object_key, sermon)
+  buy_link = sermon.search(".buy_single a")[0]
+  if buy_link
+    buy_page = agent.click(buy_link)
+    buy_graphic = buy_page.search("#copy .product_detail .product-img img")
+    buy_graphic_file = agent.get(buy_graphic.attribute("src"))
+
+    tmp_file_path = "/tmp/sermon_buy_graphic.jpg"
+    buy_graphic_file.save(tmp_file_path)
+    key = upload_file(object_key, tmp_file_path)
+    FileUtils.rm(tmp_file_path)
+
+    return key
+  end
+end
+
+def upload_series_graphic(object_key, series)
   graphic = series.search(".series_graphic img")[0]
   if graphic
     graphic_file = agent.get(graphic.attribute("src"))
-    graphic_file.save("/tmp/graphic.jpg")
-    key = upload_file(object_key, "/tmp/graphic.jpg")
-    FileUtils.rm("/tmp/graphic.jpg")
+
+    tmp_file_path = "/tmp/graphic.jpg"
+    graphic_file.save(tmp_file_path)
+    key = upload_file(object_key, tmp_file_path)
+    FileUtils.rm(tmp_file_path)
+
+    return key
+  end
+end
+
+def upload_series_buy_graphic(object_key, series)
+  buy_link = series.search(".link-buy-series")[0]
+  if buy_link
+    buy_page = agent.click(buy_link)
+    buy_graphic = buy_page.search("#copy .product_detail .product-img img")
+    buy_graphic_file = agent.get(buy_graphic.attribute("src"))
+
+    tmp_file_path = "/tmp/series_buy_graphic.jpg"
+    buy_graphic_file.save(tmp_file_path)
+    key = upload_file(object_key, tmp_file_path)
+    FileUtils.rm(tmp_file_path)
 
     return key
   end
@@ -233,9 +281,9 @@ end
 def upload_file(object_key, file_path)
   s3 = Aws::S3::Resource.new(region: 'us-east-1')
   obj = s3.bucket('wisdomonline-development').object(object_key)
-  obj.upload_file(file_path)
+  obj_status = obj.upload_file(file_path)
 
-  return obj.key
+  return obj.key if obj_status
 end
 
 main()
