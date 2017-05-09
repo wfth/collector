@@ -27,7 +27,8 @@ def upload_series(series)
   new_product.body_html = series_body_html(series)
   new_product.variants = [
     ShopifyAPI::Variant.new(
-      sku: "series-#{series.id}"
+      sku: "series-#{series.id}",
+      price: series.price
     )
   ]
   new_product.save
@@ -45,7 +46,8 @@ def upload_sermon(series, sermon)
   new_product.body_html = sermon_body_html(series, sermon)
   new_product.variants = [
     ShopifyAPI::Variant.new(
-      sku: "sermon-#{sermon.id}"
+      sku: "sermon-#{sermon.id}",
+      price: sermon.price
     )
   ]
   new_product.save
@@ -54,12 +56,13 @@ end
 def find_series
   rows = db.execute2("select * from sermon_series")
   columns = rows.shift
-  raise "Unexpected columns: #{columns}" unless columns == ["series_id", "title", "description", "released_on", "graphic_key"]
+  raise "Unexpected columns: #{columns}" unless columns == ["series_id", "title", "description", "released_on", "graphic_key", "buy_graphic_key", "price"]
   rows.map do |row|
     OpenStruct.new(
       id: row[0],
       title: row[1],
       description: row[2],
+      price: row[6],
       sermons: find_sermons(row[0])
     )
   end
@@ -68,9 +71,9 @@ end
 def find_sermons(series_id)
   rows = db.execute2("select * from sermons where sermon_series_id = ?", [series_id])
   columns = rows.shift
-  raise "Unexpected columns: #{columns}" unless columns == ["sermon_id", "title", "passage", "sermon_series_id", "audio_key", "transcript_key"]
+  raise "Unexpected columns: #{columns}" unless columns == ["sermon_id", "title", "passage", "sermon_series_id", "audio_key", "transcript_key", "buy_graphic_key", "price"]
   rows.map do |row|
-    OpenStruct.new(id: row[0], title: row[1])
+    OpenStruct.new(id: row[0], title: row[1], price: row[7])
   end
 end
 
