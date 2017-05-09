@@ -46,8 +46,6 @@ def collect_series_sermons(series, series_id)
       delete_sermon(sermon)
     end
 
-    puts "Starting a new sermon"
-
     percentage = ((index.to_f / sermons.length) * 100).to_i
     print "Progress: #{index}/#{sermons.length} (#{percentage}%) "
 
@@ -108,7 +106,8 @@ def db
         description TEXT,
         released_on TEXT,
         graphic_key TEXT,
-        buy_graphic_key TEXT
+        buy_graphic_key TEXT,
+        price REAL
       );
     SQL
 
@@ -120,7 +119,8 @@ def db
         sermon_series_id INTEGER NOT NULL,
         audio_key TEXT,
         transcript_key TEXT,
-        buy_graphic_key TEXT
+        buy_graphic_key TEXT,
+        price REAL
       );
     SQL
   end
@@ -150,8 +150,16 @@ def insert_series(series)
   graphic_key = upload_series_graphic("series/#{series_id}/graphic.jpg", series)
   db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
 
-  buy_graphic_key = upload_series_buy_graphic("series/#{series_id}/buy_graphic.jpg", series)
-  db.execute("update sermon_series set buy_graphic_key = '#{buy_graphic_key}' where series_id = #{series_id}")
+  buy_link = series.search(".link-buy-series")[0]
+  if buy_link
+    buy_page = agent.click(buy_link)
+
+    buy_graphic_key = upload_series_buy_graphic(buy_page, "series/#{series_id}/buy_graphic.jpg")
+    db.execute("update sermon_series set buy_graphic_key = '#{buy_graphic_key}' where series_id = #{series_id}")
+
+    price = get_price(buy_page)
+    db.execute("update sermon_series set price = #{price} where series_id = #{series_id}")
+  end
 
   return series_id
 end
@@ -171,8 +179,16 @@ def insert_sermon(sermon, series_id)
   audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
   db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
 
-  buy_graphic_key = upload_sermon_buy_graphic("series/#{series_id}/sermons/#{sermon_id}/buy_graphic.jpg", sermon)
-  db.execute("update sermons set buy_graphic_key = '#{buy_graphic_key}' where sermon_id is #{sermon_id}")
+  buy_link = sermon.search(".buy_single a")[0]
+  if buy_link
+    buy_page = agent.click(buy_link)
+
+    buy_graphic_key = upload_sermon_buy_graphic(buy_page, "series/#{series_id}/sermons/#{sermon_id}/buy_graphic.jpg")
+    db.execute("update sermons set buy_graphic_key = '#{buy_graphic_key}' where sermon_id is #{sermon_id}")
+
+    price = get_price(buy_page)
+    db.execute("update sermons set price = #{price} where sermon_id is #{sermon_id}")
+  end
 end
 
 def delete_sermon(sermon)
@@ -232,20 +248,16 @@ def upload_audio(object_key, sermon)
   end
 end
 
-def upload_sermon_buy_graphic(object_key, sermon)
-  buy_link = sermon.search(".buy_single a")[0]
-  if buy_link
-    buy_page = agent.click(buy_link)
-    buy_graphic = buy_page.search("#copy .product_detail .product-img img")
-    buy_graphic_file = agent.get(buy_graphic.attribute("src"))
+def upload_sermon_buy_graphic(buy_page, object_key)
+  buy_graphic = buy_page.search("#copy .product_detail .product-img img")
+  buy_graphic_file = agent.get(buy_graphic.attribute("src"))
 
-    tmp_file_path = "/tmp/sermon_buy_graphic.jpg"
-    buy_graphic_file.save(tmp_file_path)
-    key = upload_file(object_key, tmp_file_path)
-    FileUtils.rm(tmp_file_path)
+  tmp_file_path = "/tmp/sermon_buy_graphic.jpg"
+  buy_graphic_file.save(tmp_file_path)
+  key = upload_file(object_key, tmp_file_path)
+  FileUtils.rm(tmp_file_path)
 
-    return key
-  end
+  return key
 end
 
 def upload_series_graphic(object_key, series)
@@ -262,20 +274,20 @@ def upload_series_graphic(object_key, series)
   end
 end
 
-def upload_series_buy_graphic(object_key, series)
-  buy_link = series.search(".link-buy-series")[0]
-  if buy_link
-    buy_page = agent.click(buy_link)
-    buy_graphic = buy_page.search("#copy .product_detail .product-img img")
-    buy_graphic_file = agent.get(buy_graphic.attribute("src"))
+def upload_series_buy_graphic(buy_page, object_key)
+  buy_graphic = buy_page.search("#copy .product_detail .product-img img")
+  buy_graphic_file = agent.get(buy_graphic.attribute("src"))
 
-    tmp_file_path = "/tmp/series_buy_graphic.jpg"
-    buy_graphic_file.save(tmp_file_path)
-    key = upload_file(object_key, tmp_file_path)
-    FileUtils.rm(tmp_file_path)
+  tmp_file_path = "/tmp/series_buy_graphic.jpg"
+  buy_graphic_file.save(tmp_file_path)
+  key = upload_file(object_key, tmp_file_path)
+  FileUtils.rm(tmp_file_path)
 
-    return key
-  end
+  return key
+end
+
+def get_price(buy_page)
+  return buy_page.search(".product_detail .price").text.gsub(/[^0-9\.]/, "").to_f
 end
 
 def upload_file(object_key, file_path)
