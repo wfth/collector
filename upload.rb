@@ -20,18 +20,18 @@ def shop
 end
 
 def upload_series(series)
-  new_product = ShopifyAPI::Product.new
-  new_product.title = series.title
-  new_product.product_type = "Series"
-  new_product.handle = product_handle(series.title)
-  new_product.body_html = series_body_html(series)
-  new_product.variants = [
+  series_product = ShopifyAPI::Product.new
+  series_product.title = series.title
+  series_product.product_type = "Series"
+  series_product.handle = product_handle(series.title)
+  series_product.body_html = series_body_html(series)
+  series_product.variants = [
     ShopifyAPI::Variant.new(
       sku: "series-#{series.id}",
       price: series.price
     )
   ]
-  new_product.save
+  series_product.save
 
   series.sermons.each do |sermon|
     upload_sermon(series, sermon)
@@ -39,18 +39,18 @@ def upload_series(series)
 end
 
 def upload_sermon(series, sermon)
-  new_product = ShopifyAPI::Product.new
-  new_product.title = sermon.title
-  new_product.product_type = "Sermon"
-  new_product.handle = product_handle(sermon.title)
-  new_product.body_html = sermon_body_html(series, sermon)
-  new_product.variants = [
+  sermon_product = ShopifyAPI::Product.new
+  sermon_product.title = sermon.title
+  sermon_product.product_type = "Sermon"
+  sermon_product.handle = product_handle(sermon.title)
+  sermon_product.body_html = sermon_body_html(series, sermon)
+  sermon_product.variants = [
     ShopifyAPI::Variant.new(
       sku: "sermon-#{sermon.id}",
       price: sermon.price
     )
   ]
-  new_product.save
+  sermon_product.save
 end
 
 def find_series
@@ -73,7 +73,11 @@ def find_sermons(series_id)
   columns = rows.shift
   raise "Unexpected columns: #{columns}" unless columns == ["sermon_id", "title", "passage", "sermon_series_id", "audio_key", "transcript_key", "buy_graphic_key", "price"]
   rows.map do |row|
-    OpenStruct.new(id: row[0], title: row[1], price: row[7])
+    OpenStruct.new(
+      id: row[0],
+      title: row[1],
+      price: row[7]
+    )
   end
 end
 
@@ -82,7 +86,10 @@ def product_handle(title)
 end
 
 def series_body_html(series)
-  %Q{<p class="description">#{series.description}</p><p class="series-sermons">Sermons in this series:<ol>#{series_sermons_body_html(series.sermons)}</ol></p>}
+  %Q{<p class="description">#{series.description}</p>
+     <p class="series-sermons">Sermons in this series:
+        <ol>#{series_sermons_body_html(series.sermons)}</ol>
+     </p>}
 end
 
 def series_sermons_body_html(sermons)
@@ -92,7 +99,8 @@ def series_sermons_body_html(sermons)
 end
 
 def sermon_body_html(series, sermon)
-  %Q{<p class="description">#{sermon.description}</p><p>This sermon is a part of the series #{product_link(series.title)}.</p>}
+  %Q{<p class="description">#{sermon.description}</p>
+     <p>This sermon is a part of the series #{product_link(series.title)}.</p>}
 end
 
 def product_link(title)
