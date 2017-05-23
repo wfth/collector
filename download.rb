@@ -2,7 +2,7 @@ $LOAD_PATH.unshift(".")
 
 require 'pp'
 require 'mechanize'
-require 'sqlite3'
+require 'pg'
 require 'json'
 require 'aws-sdk'
 require 'fileutils'
@@ -31,7 +31,7 @@ def main
 end
 
 def find_series_id(title)
-  db.execute("select series_id from sermon_series where title = ?", title).flatten[0].to_i
+  db.exec_params("select id from sermon_series where title = $1", [title]).getvalue(0,0).to_i
 end
 
 def collect_series_sermons(series, series_id)
@@ -62,8 +62,8 @@ end
 def series_status(series)
   sermons = series.search(".series_links > ul > li")
   sermons.each_with_index do |sermon, index|
-    sermon_object = db.execute("select * from sermons where title = ?", sermon_title(sermon)).flatten.first
-    if sermon_object == nil
+    sermon_object = db.exec_params("select * from sermons where title = $1", [sermon_title(sermon)])
+    if sermon_object.ntuples == 0
       if index == 0
         return :nonexistent
       else
@@ -76,14 +76,14 @@ def series_status(series)
 end
 
 def sermon_status(sermon)
-  sermon_object = db.execute("select audio_key, transcript_key from sermons where title = ?", sermon_title(sermon)).flatten
+  sermon_object = db.exec_params("select audio_key, transcript_key from sermons where title = $1", [sermon_title(sermon)])
 
-  if sermon_object != [] && sermon_object.all?
-    return :complete
-  elsif sermon_object != [] && !sermon_object.all?
-    return :incomplete
-  else
+  if sermon_object.ntuples == 0
     return :nonexistent
+  elsif sermon_object[0]["audio_key"] != nil && sermon_object[0]["transcript_key"] != nil
+    return :complete
+  else
+    return :incomplete
   end
 end
 
@@ -97,11 +97,18 @@ end
 
 def db
   unless @db
-    @db = SQLite3::Database.new("wfth.db")
+    initial_connection = PG.connect(user: "postgres", password: "postgres")
 
-    @db.execute <<-SQL
+    begin
+      connection.exec("CREATE DATABASE collector")
+    rescue
+    end
+
+    @db = PG.connect(dbname: 'collector', user: "postgres", password: "postgres")
+
+    @db.exec <<-SQL
       create table if not exists sermon_series (
-        series_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        id SERIAL,
         title TEXT NOT NULL,
         description TEXT,
         released_on TEXT,
@@ -111,9 +118,9 @@ def db
       );
     SQL
 
-    @db.execute <<-SQL
+    @db.exec <<-SQL
       create table if not exists sermons (
-        sermon_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        id SERIAL,
         title TEXT NOT NULL,
         passage TEXT,
         sermon_series_id INTEGER NOT NULL,
@@ -141,24 +148,23 @@ end
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
 
-  db.execute("insert into sermon_series (title, description, released_on) values (?, ?, ?)",
-             series_metadata["title"],
+  series_id = db.exec_params("insert into sermon_series (title, description, released_on) values ($1, $2, $3) returning id",
+             [series_metadata["title"],
              series_metadata["description"],
-             series_metadata["date"])
-  series_id = db.last_insert_row_id
+             series_metadata["date"]]).getvalue(0,0).to_i
 
   graphic_key = upload_series_graphic("series/#{series_id}/graphic.jpg", series)
-  db.execute("update sermon_series set graphic_key = '#{graphic_key}' where series_id = #{series_id}")
+  db.exec_params("update sermon_series set graphic_key = $1 where id = $2", [graphic_key.to_s, series_id])
 
   buy_link = series.search(".link-buy-series")[0]
   if buy_link
     buy_page = agent.click(buy_link)
 
     buy_graphic_key = upload_series_buy_graphic(buy_page, "series/#{series_id}/buy_graphic.jpg")
-    db.execute("update sermon_series set buy_graphic_key = '#{buy_graphic_key}' where series_id = #{series_id}")
+    db.exec_params("update sermon_series set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, series_id])
 
     price = get_price(buy_page)
-    db.execute("update sermon_series set price = #{price} where series_id = #{series_id}")
+    db.exec_params("update sermon_series set price = $1 where id = $2", [price, series_id])
   end
 
   return series_id
@@ -167,33 +173,32 @@ end
 def insert_sermon(sermon, series_id)
   sermon_metadata = compile_sermon_metadata(sermon)
 
-  db.execute("insert into sermons (title, passage, sermon_series_id) values (?, ?, ?)",
-             sermon_metadata["title"],
+  sermon_id = db.exec_params("insert into sermons (title, passage, sermon_series_id) values ($1, $2, $3) returning id",
+             [sermon_metadata["title"],
              sermon_metadata["passage"],
-             series_id)
-  sermon_id = db.last_insert_row_id
+             series_id]).getvalue(0,0)
 
   transcript_key = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
-  db.execute("update sermons set transcript_key = '#{transcript_key}' where sermon_id is #{sermon_id}")
+  db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_key.to_s, sermon_id])
 
   audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
-  db.execute("update sermons set audio_key = '#{audio_key}' where sermon_id is #{sermon_id}")
+  db.exec_params("update sermons set audio_key = $1 where id = $2", [audio_key.to_s, sermon_id])
 
   buy_link = sermon.search(".buy_single a")[0]
   if buy_link
     buy_page = agent.click(buy_link)
 
     buy_graphic_key = upload_sermon_buy_graphic(buy_page, "series/#{series_id}/sermons/#{sermon_id}/buy_graphic.jpg")
-    db.execute("update sermons set buy_graphic_key = '#{buy_graphic_key}' where sermon_id is #{sermon_id}")
+    db.exec_params("update sermons set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, sermon_id])
 
     price = get_price(buy_page)
-    db.execute("update sermons set price = #{price} where sermon_id is #{sermon_id}")
+    db.exec_params("update sermons set price = $1 where id = $2", [price, sermon_id])
   end
 end
 
 def delete_sermon(sermon)
   sermon_metadata = compile_sermon_metadata(sermon)
-  db.execute("delete from sermons where sermon_id = ( select sermon_id from sermons where title = '#{sermon_metadata["title"]}' order by sermon_id limit 1 )")
+  db.exec_params("delete from sermons where id = ( select id from sermons where title = $1 order by id limit 1 )", [sermon_metadata["title"].to_s])
 end
 
 def compile_series_metadata(series)
