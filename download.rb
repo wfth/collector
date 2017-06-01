@@ -122,7 +122,7 @@ def db
       create table if not exists sermons (
         id SERIAL,
         title TEXT NOT NULL,
-        description TEXT NOT NULL,
+        description TEXT,
         passage TEXT,
         sermon_series_id INTEGER NOT NULL,
         audio_key TEXT,
@@ -172,7 +172,13 @@ def insert_series(series)
 end
 
 def insert_sermon(sermon, series_id)
-  sermon_metadata = compile_sermon_metadata(sermon)
+  buy_link = sermon.search(".buy_single a")[0]
+  if buy_link
+    buy_page = agent.click(buy_link)
+    sermon_metadata = compile_sermon_metadata(sermon, buy_page)
+  else
+    sermon_metadata = compile_sermon_metadata(sermon)
+  end
 
   sermon_id = db.exec_params("insert into sermons (title, description, passage, sermon_series_id) values ($1, $2, $3, $4) returning id",
                              [sermon_metadata["title"],
@@ -186,7 +192,6 @@ def insert_sermon(sermon, series_id)
   audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
   db.exec_params("update sermons set audio_key = $1 where id = $2", [audio_key.to_s, sermon_id])
 
-  buy_link = sermon.search(".buy_single a")[0]
   if buy_link
     buy_page = agent.click(buy_link)
 
@@ -213,13 +218,13 @@ def compile_series_metadata(series)
   return metadata
 end
 
-def compile_sermon_metadata(sermon)
+def compile_sermon_metadata(sermon, buy_page = nil)
   sermon_title = sermon.search(".sermon_title").text[/.+?(?= -)/]
   if sermon_title == nil
     sermon_title = sermon.search(".sermon_title").text[/.+/]
   end
-  buy_page = agent.click(sermon.search(".buy_single a")[0])
-  description = buy_page.search("#copy .product_detail .description p").text
+
+  description = buy_page != nil ? buy_page.search("#copy .product_detail .description p").text : nil
 
   metadata = {
     "title" => sermon_title,
