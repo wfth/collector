@@ -122,6 +122,7 @@ def db
       create table if not exists sermons (
         id SERIAL,
         title TEXT NOT NULL,
+        description TEXT NOT NULL,
         passage TEXT,
         sermon_series_id INTEGER NOT NULL,
         audio_key TEXT,
@@ -173,10 +174,11 @@ end
 def insert_sermon(sermon, series_id)
   sermon_metadata = compile_sermon_metadata(sermon)
 
-  sermon_id = db.exec_params("insert into sermons (title, passage, sermon_series_id) values ($1, $2, $3) returning id",
-             [sermon_metadata["title"],
-             sermon_metadata["passage"],
-             series_id]).getvalue(0,0)
+  sermon_id = db.exec_params("insert into sermons (title, description, passage, sermon_series_id) values ($1, $2, $3, $4) returning id",
+                             [sermon_metadata["title"],
+                              sermon_metadata["description"],
+                              sermon_metadata["passage"],
+                              series_id]).getvalue(0,0)
 
   transcript_key = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
   db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_key.to_s, sermon_id])
@@ -216,10 +218,13 @@ def compile_sermon_metadata(sermon)
   if sermon_title == nil
     sermon_title = sermon.search(".sermon_title").text[/.+/]
   end
+  buy_page = agent.click(sermon.search(".buy_single a")[0])
+  description = buy_page.search("#copy .product_detail .description p").text
 
   metadata = {
     "title" => sermon_title,
-    "passage" => sermon.search(".sermon_title").text[/(?<=- ).+/]
+    "passage" => sermon.search(".sermon_title").text[/(?<=- ).+/],
+    "description" => description
   }
 
   return metadata
