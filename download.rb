@@ -112,6 +112,7 @@ def db
         title TEXT NOT NULL,
         description TEXT,
         released_on TEXT,
+        passages TEXT,
         graphic_key TEXT,
         buy_graphic_key TEXT,
         price REAL
@@ -149,10 +150,11 @@ end
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
 
-  series_id = db.exec_params("insert into sermon_series (title, description, released_on) values ($1, $2, $3) returning id",
+  series_id = db.exec_params("insert into sermon_series (title, description, released_on, passages) values ($1, $2, $3, $4) returning id",
              [series_metadata["title"],
              series_metadata["description"],
-             series_metadata["date"]]).getvalue(0,0).to_i
+             series_metadata["date"],
+             series_metadata["passages"]]).getvalue(0,0).to_i
 
   graphic_key = upload_series_graphic("series/#{series_id}/graphic.jpg", series)
   db.exec_params("update sermon_series set graphic_key = $1 where id = $2", [graphic_key.to_s, series_id])
@@ -212,10 +214,21 @@ def compile_series_metadata(series)
   metadata = {
     "title" => series.search(".title").text,
     "date" => series.search(".date").text,
-    "description" => series.search(".description p").text
+    "description" => series.search(".description p").text,
+    "passages" => series_passages(series).reduce { |greeting, rstr| rstr + ", " + greeting }
   }
 
   return metadata
+end
+
+def series_passages(series)
+  passage_texts = []
+  passages_list = series.search(".series_info .scriptures #scripture_refs")
+  passages_list.each do |passage|
+    passage_texts << passage.text
+  end
+
+  return passage_texts
 end
 
 def compile_sermon_metadata(sermon, buy_page = nil)
