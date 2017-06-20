@@ -14,6 +14,7 @@ def main
   puts "Loading messages"
   messages_page = agent.get("http://www.wisdomonline.org/media/messages")
   scripture_links = messages_page.search("div#scripture li a")
+  agent.keep_alive = false
 
   scripture_links.each do |scripture|
     scripture_page = agent.click(scripture)
@@ -215,20 +216,14 @@ def compile_series_metadata(series)
     "title" => series.search(".title").text,
     "date" => series.search(".date").text,
     "description" => series.search(".description p").text,
-    "passages" => series_passages(series).reduce { |greeting, rstr| rstr + ", " + greeting }
+    "passages" => series_passages(series)
   }
 
   return metadata
 end
 
 def series_passages(series)
-  passage_texts = []
-  passages_list = series.search(".series_info .scriptures #scripture_refs")
-  passages_list.each do |passage|
-    passage_texts << passage.text
-  end
-
-  return passage_texts
+  series.search(".series_info .scriptures #scripture_refs").text.strip.gsub(/[\n\t]+/, ", ")
 end
 
 def compile_sermon_metadata(sermon, buy_page = nil)
