@@ -7,6 +7,7 @@ require 'json'
 require 'aws-sdk'
 require 'fileutils'
 require 'beachball'
+require 'securerandom'
 
 def main
   setup_aws
@@ -48,7 +49,8 @@ def collect_series_sermons(series, series_id)
     end
 
     percentage = ((index.to_f / sermons.length) * 100).to_i
-    print "Progress: #{index}/#{sermons.length} (#{percentage}%) "
+    progress_string = "Progress: #{index}/#{sermons.length} (#{percentage}%) "
+    print progress_string
 
     beachball = Beachball.new(10)
     beachball.start
@@ -56,7 +58,7 @@ def collect_series_sermons(series, series_id)
     insert_sermon(sermon, series_id)
 
     beachball.stop
-    print "\b"*22
+    print "\b"*(progress_string.length
   end
 end
 
@@ -150,6 +152,7 @@ end
 
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
+  uuid = SecureRandom.uuid
 
   series_id = db.exec_params("insert into sermon_series (title, description, released_on, passages) values ($1, $2, $3, $4) returning id",
              [series_metadata["title"],
@@ -157,14 +160,14 @@ def insert_series(series)
              series_metadata["date"],
              series_metadata["passages"]]).getvalue(0,0).to_i
 
-  graphic_key = upload_series_graphic("series/#{series_id}/graphic.jpg", series)
+  graphic_key = upload_series_graphic(series, uuid)
   db.exec_params("update sermon_series set graphic_key = $1 where id = $2", [graphic_key.to_s, series_id])
 
   buy_link = series.search(".link-buy-series")[0]
   if buy_link
     buy_page = agent.click(buy_link)
 
-    buy_graphic_key = upload_series_buy_graphic(buy_page, "series/#{series_id}/buy_graphic.jpg")
+    buy_graphic_key = upload_series_buy_graphic(buy_page, uuid)
     db.exec_params("update sermon_series set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, series_id])
 
     price = get_price(buy_page)
@@ -182,6 +185,7 @@ def insert_sermon(sermon, series_id)
   else
     sermon_metadata = compile_sermon_metadata(sermon)
   end
+  uuid = SecureRandom.uuid
 
   sermon_id = db.exec_params("insert into sermons (title, description, passage, sermon_series_id) values ($1, $2, $3, $4) returning id",
                              [sermon_metadata["title"],
@@ -189,16 +193,16 @@ def insert_sermon(sermon, series_id)
                               sermon_metadata["passage"],
                               series_id]).getvalue(0,0)
 
-  transcript_key = upload_transcript("series/#{series_id}/sermons/#{sermon_id}/transcript.pdf", sermon)
+  transcript_key = upload_transcript(sermon, uuid)
   db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_key.to_s, sermon_id])
 
-  audio_key = upload_audio("series/#{series_id}/sermons/#{sermon_id}/audio.mp3", sermon)
+  audio_key = upload_audio(sermon, uuid)
   db.exec_params("update sermons set audio_key = $1 where id = $2", [audio_key.to_s, sermon_id])
 
   if buy_link
     buy_page = agent.click(buy_link)
 
-    buy_graphic_key = upload_sermon_buy_graphic(buy_page, "series/#{series_id}/sermons/#{sermon_id}/buy_graphic.jpg")
+    buy_graphic_key = upload_sermon_buy_graphic(buy_page, uuid)
     db.exec_params("update sermons set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, sermon_id])
 
     price = get_price(buy_page)
@@ -243,67 +247,67 @@ def compile_sermon_metadata(sermon, buy_page = nil)
   return metadata
 end
 
-def upload_transcript(object_key, sermon)
+def upload_transcript(sermon, uuid)
   transcript_link = sermon.search(".transcript a")[0]
   if transcript_link
     transcript = agent.click(transcript_link)
 
     tmp_file_path = "/tmp/transcript.pdf"
     transcript.save(tmp_file_path)
-    key = upload_file(object_key, tmp_file_path)
+    key = upload_file("sermons/#{uuid}/#{transcript.name}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return key
   end
 end
 
-def upload_audio(object_key, sermon)
+def upload_audio(sermon, uuid)
   audio_link = sermon.search(".audio a")[0]
   if audio_link
     audio = agent.click(audio_link)
 
     tmp_file_path = "/tmp/audio.mp3"
     audio.save(tmp_file_path)
-    key = upload_file(object_key, tmp_file_path)
+    key = upload_file("sermons/#{uuid}/#{audio.name}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return key
   end
 end
 
-def upload_sermon_buy_graphic(buy_page, object_key)
+def upload_sermon_buy_graphic(buy_page, uuid)
   buy_graphic = buy_page.search("#copy .product_detail .product-img img")
   buy_graphic_file = agent.get(buy_graphic.attribute("src"))
 
   tmp_file_path = "/tmp/sermon_buy_graphic.jpg"
   buy_graphic_file.save(tmp_file_path)
-  key = upload_file(object_key, tmp_file_path)
+  key = upload_file("sermons/#{uuid}/#{buy_graphic_file.name}", tmp_file_path)
   FileUtils.rm(tmp_file_path)
 
   return key
 end
 
-def upload_series_graphic(object_key, series)
+def upload_series_graphic(series, uuid)
   graphic = series.search(".series_graphic img")[0]
   if graphic
     graphic_file = agent.get(graphic.attribute("src"))
 
     tmp_file_path = "/tmp/graphic.jpg"
     graphic_file.save(tmp_file_path)
-    key = upload_file(object_key, tmp_file_path)
+    key = upload_file("sermon_series/#{uuid}/#{graphic_file.name}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return key
   end
 end
 
-def upload_series_buy_graphic(buy_page, object_key)
+def upload_series_buy_graphic(buy_page, uuid)
   buy_graphic = buy_page.search("#copy .product_detail .product-img img")
   buy_graphic_file = agent.get(buy_graphic.attribute("src"))
 
   tmp_file_path = "/tmp/series_buy_graphic.jpg"
   buy_graphic_file.save(tmp_file_path)
-  key = upload_file(object_key, tmp_file_path)
+  key = upload_file("sermon_series/#{uuid}/#{buy_graphic_file.name}", tmp_file_path)
   FileUtils.rm(tmp_file_path)
 
   return key
