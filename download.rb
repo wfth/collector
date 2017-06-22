@@ -28,7 +28,9 @@ def main
         puts series_title(series)
         case series_status(series)
         when :incomplete
-          collect_series_sermons(series, find_series_id(series_title(series)))
+          series_id = find_series_id(series_title(series))
+          delete_series_sermons(series_id)
+          collect_series_sermons(series, series_id)
         when :nonexistent
           collect_series_sermons(series, insert_series(series))
         end
@@ -45,16 +47,22 @@ def find_series_id(title)
   db.exec_params("select id from sermon_series where title = $1", [title]).getvalue(0,0).to_i
 end
 
+def delete_series_sermons(series_id)
+  sermons = db.exec_params("select * from sermons where sermon_series_id = $1", [series_id])
+  sermons.each do |tuple|
+    delete_file(tuple["audio_key"])
+    delete_file(tuple["transcript_key"])
+    delete_file(tuple["buy_graphic_key"])
+  end
+  db.exec_params("delete from sermons where sermon_series_id = $1", [series_id])
+end
+
 def collect_series_sermons(series, series_id)
   return if series_id < 0
 
   sermons = series.search(".series_links > ul > li")
 
   sermons.each_with_index do |sermon, index|
-    if sermon_status(sermon) == :incomplete
-      delete_sermon(sermon) # comment out this line if not downloading audio and transcripts
-    end
-
     percentage = ((index.to_f / sermons.length) * 100).to_i
     progress_string = "Progress: #{index}/#{sermons.length} (#{percentage}%) "
     print progress_string
@@ -93,19 +101,7 @@ def series_status(series)
     return :nonexistent
   elsif series_exists && sermons_ratio == 1
     return :complete
-  elsif series_exists && sermons_ratio > 0
-    return :incomplete
-  end
-end
-
-def sermon_status(sermon)
-  sermon_object = db.exec_params("select audio_key, transcript_key from sermons where title = $1", [sermon_title(sermon)])
-
-  if sermon_object.ntuples == 0
-    return :nonexistent
-  elsif sermon_object[0]["audio_key"] != nil && sermon_object[0]["transcript_key"] != nil
-    return :complete
-  else
+  elsif series_exists && (sermons_ratio == 0 || sermons_ratio > 0)
     return :incomplete
   end
 end
@@ -278,7 +274,7 @@ def upload_transcript(sermon, uuid)
 
     tmp_file_path = "/tmp/transcript.pdf"
     transcript.save(tmp_file_path)
-    key = upload_file("sermons/#{uuid}/#{transcript.name}", tmp_file_path)
+    key = upload_file("sermons/#{uuid}/#{transcript.filename}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return key
@@ -292,7 +288,7 @@ def upload_audio(sermon, uuid)
 
     tmp_file_path = "/tmp/audio.mp3"
     audio.save(tmp_file_path)
-    key = upload_file("sermons/#{uuid}/#{audio.name}", tmp_file_path)
+    key = upload_file("sermons/#{uuid}/#{audio.filename}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return key
@@ -305,7 +301,7 @@ def upload_sermon_buy_graphic(buy_page, uuid)
 
   tmp_file_path = "/tmp/sermon_buy_graphic.jpg"
   buy_graphic_file.save(tmp_file_path)
-  key = upload_file("sermons/#{uuid}/#{buy_graphic_file.name}", tmp_file_path)
+  key = upload_file("sermons/#{uuid}/#{buy_graphic_file.filename}", tmp_file_path)
   FileUtils.rm(tmp_file_path)
 
   return key
@@ -318,7 +314,7 @@ def upload_series_graphic(series, uuid)
 
     tmp_file_path = "/tmp/graphic.jpg"
     graphic_file.save(tmp_file_path)
-    key = upload_file("sermon_series/#{uuid}/#{graphic_file.name}", tmp_file_path)
+    key = upload_file("sermon_series/#{uuid}/#{graphic_file.filename}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return key
@@ -331,7 +327,7 @@ def upload_series_buy_graphic(buy_page, uuid)
 
   tmp_file_path = "/tmp/series_buy_graphic.jpg"
   buy_graphic_file.save(tmp_file_path)
-  key = upload_file("sermon_series/#{uuid}/#{buy_graphic_file.name}", tmp_file_path)
+  key = upload_file("sermon_series/#{uuid}/#{buy_graphic_file.filename}", tmp_file_path)
   FileUtils.rm(tmp_file_path)
 
   return key
@@ -339,6 +335,13 @@ end
 
 def get_price(buy_page)
   return buy_page.search(".product_detail .price").text.gsub(/[^0-9\.]/, "").to_f
+end
+
+def delete_file(object_key)
+  return if object_key == nil
+  s3 = Aws::S3::Resource.new(region: 'us-east-1')
+  obj = s3.bucket('wisdomonline-development').object(object_key)
+  obj.delete
 end
 
 def upload_file(object_key, file_path)
