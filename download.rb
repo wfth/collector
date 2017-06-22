@@ -28,7 +28,7 @@ def main
         puts series_title(series)
         case series_status(series)
         when :incomplete
-          series_id = find_series_id(series_title(series))
+          series_id = find_series_id(compile_series_metadata(series)["a_id"])
           delete_series_sermons(series_id)
           collect_series_sermons(series, series_id)
         when :nonexistent
@@ -43,8 +43,8 @@ def main
   end
 end
 
-def find_series_id(title)
-  db.exec_params("select id from sermon_series where title = $1", [title]).getvalue(0,0).to_i
+def find_series_id(a_id)
+  db.exec_params("select id from sermon_series where a_id = $1", [a_id]).getvalue(0,0).to_i
 end
 
 def delete_series_sermons(series_id)
@@ -78,7 +78,7 @@ def collect_series_sermons(series, series_id)
 end
 
 def series_status(series)
-  series_exists = db.exec_params("select * from sermon_series where title = $1", [series_title(series)]).ntuples > 0
+  series_exists = db.exec_params("select * from sermon_series where a_id = $1", [compile_series_metadata(series)["a_id"]]).ntuples > 0
 
   sermons = series.search(".series_links > ul > li")
   sermons_in_database = []
@@ -128,6 +128,7 @@ def db
     @db.exec <<-SQL
       create table if not exists sermon_series (
         id SERIAL,
+        a_id INTEGER UNIQUE,
         title TEXT NOT NULL,
         description TEXT,
         released_on TEXT,
@@ -168,18 +169,19 @@ end
 
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
-  if !db.exec_params("select * from sermon_series where title = $1", [series_metadata["title"]]).ntuples.zero?
+  if !db.exec_params("select * from sermon_series where a_id = $1", [series_metadata["a_id"]]).ntuples.zero?
     puts "found duplicate"
     return -1
   end
 
   uuid = SecureRandom.uuid
 
-  series_id = db.exec_params("insert into sermon_series (title, description, released_on, passages) values ($1, $2, $3, $4) returning id",
-             [series_metadata["title"],
-             series_metadata["description"],
-             series_metadata["date"],
-             series_metadata["passages"]]).getvalue(0,0).to_i
+  series_id = db.exec_params("insert into sermon_series (a_id, title, description, released_on, passages) values ($1, $2, $3, $4, $5) returning id",
+                             [series_metadata["a_id"],
+                              series_metadata["title"],
+                              series_metadata["description"],
+                              series_metadata["date"],
+                              series_metadata["passages"]]).getvalue(0,0).to_i
 
   graphic_key = upload_series_graphic(series, uuid)
   db.exec_params("update sermon_series set graphic_key = $1 where id = $2", [graphic_key.to_s, series_id])
@@ -237,6 +239,7 @@ end
 
 def compile_series_metadata(series)
   metadata = {
+    "a_id" => series.search(".link-buy-series").attr("href").text.split("/").last,
     "title" => series.search(".title").text,
     "date" => series.search(".date").text,
     "description" => series.search(".description p").text,
