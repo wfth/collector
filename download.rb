@@ -19,14 +19,23 @@ def main
 
   scripture_links.each do |scripture|
     scripture_page = agent.click(scripture)
-    series_collection = scripture_page.search(".series_list > li")
+    scripture_pages = scripture_page.search("#copy .pager li a")
 
-    series_collection.each do |series|
-      case series_status(series)
-      when :incomplete
-        collect_series_sermons(series, find_series_id(series_title(series)))
-      when :nonexistent
-        collect_series_sermons(series, insert_series(series))
+    (scripture_pages.empty? ? 1..1 : scripture_pages).each do |page|
+      series_collection = scripture_page.search(".series_list > li")
+
+      series_collection.each do |series|
+        puts series_title(series)
+        case series_status(series)
+        when :incomplete
+          collect_series_sermons(series, find_series_id(series_title(series)))
+        when :nonexistent
+          collect_series_sermons(series, insert_series(series))
+        end
+      end
+
+      if page != 1
+        scripture_page = agent.click(page) if page.text =~ /[1-9]/
       end
     end
   end
@@ -37,15 +46,13 @@ def find_series_id(title)
 end
 
 def collect_series_sermons(series, series_id)
-  puts "Starting a new series"
+  return if series_id < 0
 
   sermons = series.search(".series_links > ul > li")
 
   sermons.each_with_index do |sermon, index|
-    if sermon_status(sermon) == :complete
-      next
-    elsif sermon_status(sermon) == :incomplete
-      delete_sermon(sermon)
+    if sermon_status(sermon) == :incomplete
+      delete_sermon(sermon) # comment out this line if not downloading audio and transcripts
     end
 
     percentage = ((index.to_f / sermons.length) * 100).to_i
@@ -58,24 +65,37 @@ def collect_series_sermons(series, series_id)
     insert_sermon(sermon, series_id)
 
     beachball.stop
-    print "\b"*(progress_string.length
+    print "\b"*(progress_string.length)
   end
 end
 
 def series_status(series)
+  series_exists = db.exec_params("select * from sermon_series where title = $1", [series_title(series)]).ntuples > 0
+
   sermons = series.search(".series_links > ul > li")
+  sermons_in_database = []
   sermons.each_with_index do |sermon, index|
     sermon_object = db.exec_params("select * from sermons where title = $1", [sermon_title(sermon)])
-    if sermon_object.ntuples == 0
-      if index == 0
-        return :nonexistent
-      else
-        return :incomplete
-      end
+    if !sermon_object.ntuples.zero?
+      sermons_in_database << sermon_object
     end
   end
 
-  return :complete
+  if sermons_in_database.count == sermons.count
+    sermons_ratio = 1
+  elsif sermons_in_database.count == 0
+    sermons_ratio = 0
+  elsif sermons_in_database.count < sermons.count
+    sermons_ratio = sermons_in_database.count.to_f / sermons.count
+  end
+
+  if !series_exists && (sermons_ratio == 0 || sermons_ratio > 0)
+    return :nonexistent
+  elsif series_exists && sermons_ratio == 1
+    return :complete
+  elsif series_exists && sermons_ratio > 0
+    return :incomplete
+  end
 end
 
 def sermon_status(sermon)
@@ -103,11 +123,11 @@ def db
     initial_connection = PG.connect(user: "postgres", password: "postgres")
 
     begin
-      connection.exec("CREATE DATABASE collector")
+      connection.exec("CREATE DATABASE collector_dev")
     rescue
     end
 
-    @db = PG.connect(dbname: 'collector', user: "postgres", password: "postgres")
+    @db = PG.connect(dbname: 'collector_dev', user: "postgres", password: "postgres")
 
     @db.exec <<-SQL
       create table if not exists sermon_series (
@@ -152,6 +172,11 @@ end
 
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
+  if !db.exec_params("select * from sermon_series where title = $1", [series_metadata["title"]]).ntuples.zero?
+    puts "found duplicate"
+    return -1
+  end
+
   uuid = SecureRandom.uuid
 
   series_id = db.exec_params("insert into sermon_series (title, description, released_on, passages) values ($1, $2, $3, $4) returning id",
@@ -185,6 +210,7 @@ def insert_sermon(sermon, series_id)
   else
     sermon_metadata = compile_sermon_metadata(sermon)
   end
+
   uuid = SecureRandom.uuid
 
   sermon_id = db.exec_params("insert into sermons (title, description, passage, sermon_series_id) values ($1, $2, $3, $4) returning id",
@@ -200,8 +226,6 @@ def insert_sermon(sermon, series_id)
   db.exec_params("update sermons set audio_key = $1 where id = $2", [audio_key.to_s, sermon_id])
 
   if buy_link
-    buy_page = agent.click(buy_link)
-
     buy_graphic_key = upload_sermon_buy_graphic(buy_page, uuid)
     db.exec_params("update sermons set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, sermon_id])
 
