@@ -29,8 +29,8 @@ def main
         case series_status(series)
         when :incomplete
           series_id = find_series_id(compile_series_metadata(series)["a_id"])
-          delete_series_sermons(series_id)
-          collect_series_sermons(series, series_id)
+          delete_series(series_id)
+          collect_series_sermons(series, insert_series(series))
         when :nonexistent
           collect_series_sermons(series, insert_series(series))
         end
@@ -47,7 +47,8 @@ def find_series_id(a_id)
   db.exec_params("select id from sermon_series where a_id = $1", [a_id]).getvalue(0,0).to_i
 end
 
-def delete_series_sermons(series_id)
+def delete_series(series_id)
+  db.exec_params("delete from sermon_series where id = $1", [series_id])
   sermons = db.exec_params("select * from sermons where sermon_series_id = $1", [series_id])
   sermons.each do |tuple|
     delete_file(tuple["audio_key"])
@@ -134,7 +135,9 @@ def db
         released_on TEXT,
         passages TEXT,
         graphic_key TEXT,
+        graphic_source_url TEXT,
         buy_graphic_key TEXT,
+        buy_graphic_source_url TEXT,
         price REAL
       );
     SQL
@@ -147,8 +150,11 @@ def db
         passage TEXT,
         sermon_series_id INTEGER NOT NULL,
         audio_key TEXT,
+        audio_source_url TEXT,
         transcript_key TEXT,
+        transcript_source_url TEXT,
         buy_graphic_key TEXT,
+        buy_graphic_source_url TEXT,
         price REAL
       );
     SQL
@@ -184,13 +190,17 @@ def insert_series(series)
                               series_metadata["passages"]]).getvalue(0,0).to_i
 
   graphic_key = upload_series_graphic(series, uuid)
-  db.exec_params("update sermon_series set graphic_key = $1 where id = $2", [graphic_key.to_s, series_id])
+  if graphic_key
+    db.exec_params("update sermon_series set graphic_source_url = $1 where id = $2", [series_graphic_source_url(series), series_id])
+    db.exec_params("update sermon_series set graphic_key = $1 where id = $2", [graphic_key.to_s, series_id])
+  end
 
   buy_link = series.search(".link-buy-series")[0]
   if buy_link
     buy_page = agent.click(buy_link)
 
     buy_graphic_key = upload_series_buy_graphic(buy_page, uuid)
+    db.exec_params("update sermon_series set buy_graphic_source_url = $1 where id = $2", [series_buy_graphic_source_url(buy_page), series_id])
     db.exec_params("update sermon_series set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, series_id])
 
     price = get_price(buy_page)
@@ -310,10 +320,22 @@ def upload_sermon_buy_graphic(buy_page, uuid)
   return key
 end
 
-def upload_series_graphic(series, uuid)
+def series_graphic_source_url(series)
   graphic = series.search(".series_graphic img")[0]
   if graphic
-    graphic_file = agent.get(graphic.attribute("src"))
+    return graphic.attr("src")
+  else
+    return nil
+  end
+end
+
+def series_buy_graphic_source_url(buy_page)
+  buy_page.search("#copy .product_detail .product-img img")[0].attr("src")
+end
+
+def upload_series_graphic(series, uuid)
+  if series_graphic_source_url(series)
+    graphic_file = agent.get(series_graphic_source_url(series))
 
     tmp_file_path = "/tmp/graphic.jpg"
     graphic_file.save(tmp_file_path)
@@ -325,8 +347,7 @@ def upload_series_graphic(series, uuid)
 end
 
 def upload_series_buy_graphic(buy_page, uuid)
-  buy_graphic = buy_page.search("#copy .product_detail .product-img img")
-  buy_graphic_file = agent.get(buy_graphic.attribute("src"))
+  buy_graphic_file = agent.get(series_buy_graphic_source_url(buy_page))
 
   tmp_file_path = "/tmp/series_buy_graphic.jpg"
   buy_graphic_file.save(tmp_file_path)
