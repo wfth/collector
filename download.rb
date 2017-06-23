@@ -228,13 +228,20 @@ def insert_sermon(sermon, series_id)
                               series_id]).getvalue(0,0)
 
   transcript_key = upload_transcript(sermon, uuid)
-  db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_key.to_s, sermon_id])
+  if transcript_key
+    db.exec_params("update sermons set transcript_source_url = $1 where id = $2", [transcript_source_url(sermon).attr("href"), sermon_id])
+    db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_key.to_s, sermon_id])
+  end
 
   audio_key = upload_audio(sermon, uuid)
-  db.exec_params("update sermons set audio_key = $1 where id = $2", [audio_key.to_s, sermon_id])
+  if audio_key
+    db.exec_params("update sermons set audio_source_url = $1 where id = $2", [audio_source_url(sermon).attr("href"), sermon_id])
+    db.exec_params("update sermons set audio_key = $1 where id = $2", [audio_key.to_s, sermon_id])
+  end
 
   if buy_link
     buy_graphic_key = upload_sermon_buy_graphic(buy_page, uuid)
+    db.exec_params("update sermons set buy_graphic_source_url = $1 where id = $2", [sermon_buy_graphic_source_url(buy_page), sermon_id])
     db.exec_params("update sermons set buy_graphic_key = $1 where id = $2", [buy_graphic_key.to_s, sermon_id])
 
     price = get_price(buy_page)
@@ -280,10 +287,21 @@ def compile_sermon_metadata(sermon, buy_page = nil)
   return metadata
 end
 
+def transcript_source_url(sermon)
+  sermon.search(".transcript a")[0]
+end
+
+def audio_source_url(sermon)
+  sermon.search(".audio a")[0]
+end
+
+def sermon_buy_graphic_source_url(buy_page)
+  buy_page.search("#copy .product_detail .product-img img").attr("src")
+end
+
 def upload_transcript(sermon, uuid)
-  transcript_link = sermon.search(".transcript a")[0]
-  if transcript_link
-    transcript = agent.click(transcript_link)
+  if transcript_source_url(sermon)
+    transcript = agent.click(transcript_source_url(sermon))
 
     tmp_file_path = "/tmp/transcript.pdf"
     transcript.save(tmp_file_path)
@@ -295,9 +313,8 @@ def upload_transcript(sermon, uuid)
 end
 
 def upload_audio(sermon, uuid)
-  audio_link = sermon.search(".audio a")[0]
-  if audio_link
-    audio = agent.click(audio_link)
+  if audio_source_url(sermon)
+    audio = agent.click(audio_source_url(sermon))
 
     tmp_file_path = "/tmp/audio.mp3"
     audio.save(tmp_file_path)
@@ -309,8 +326,7 @@ def upload_audio(sermon, uuid)
 end
 
 def upload_sermon_buy_graphic(buy_page, uuid)
-  buy_graphic = buy_page.search("#copy .product_detail .product-img img")
-  buy_graphic_file = agent.get(buy_graphic.attribute("src"))
+  buy_graphic_file = agent.get(sermon_buy_graphic_source_url(buy_page))
 
   tmp_file_path = "/tmp/sermon_buy_graphic.jpg"
   buy_graphic_file.save(tmp_file_path)
