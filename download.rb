@@ -400,6 +400,7 @@ end
 def upload_file(object_key, file_path)
   s3 = Aws::S3::Resource.new(region: 'us-east-1')
   obj = s3.bucket('wisdomonline-development').object(object_key)
+  obj.acl.put({acl: "public-read"})
   obj_status = obj.upload_file(file_path)
 
   return obj.key if obj_status
