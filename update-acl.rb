@@ -2,12 +2,30 @@ $LOAD_PATH.unshift(".")
 
 require 'pg'
 require 'aws-sdk'
+require 'beachball'
 
 def main
-  sermon_series_keys = db.exec("select graphic_key, buy_graphic_key from sermon_series")
-  sermon_series_keys.each do |row|
+  print "Updating sermon series ACLs "
+  series_beachball = Beachball.new(10)
+  series_beachball.start
+
+  db.exec("select graphic_key, buy_graphic_key from sermon_series").each do |row|
     make_public_readable(row["graphic_key"], row["buy_graphic_key"])
   end
+
+  print "\b"
+  series_beachball.stop
+  puts "\nFinished sermon series."
+
+  print "Updating sermon ACLs "
+  sermon_beachball = Beachball.new(10)
+  sermon_beachball.start
+
+  db.exec("select audio_key, buy_graphic_key from sermons").each do |row|
+    make_public_readable(row["audio_key"], row["buy_graphic_key"])
+  end
+
+  sermon_beachball.stop
 end
 
 def s3
