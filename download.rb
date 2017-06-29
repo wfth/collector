@@ -12,12 +12,15 @@ require 'securerandom'
 def main
   setup_aws
 
-  puts "Loading messages"
+  puts "Loading messages - #{current_time}"
+  puts "\n\n"
   messages_page = agent.get("http://www.wisdomonline.org/media/messages")
   scripture_links = messages_page.search("div#scripture li a")
   agent.keep_alive = false
 
   scripture_links.each do |scripture|
+    puts "#{scripture.text} - #{current_time}"
+    puts ""
     scripture_page = agent.click(scripture)
     scripture_pages = scripture_page.search("#copy .pager li a")
 
@@ -25,15 +28,20 @@ def main
       series_collection = scripture_page.search(".series_list > li")
 
       series_collection.each do |series|
-        puts series_title(series)
+        start_time = Time.now
+        puts "#{series_title(series)} - #{current_time}"
         case series_status(series)
         when :incomplete
-          series_id = find_series_id(compile_series_metadata(series)["a_id"])
+          series_metadata = compile_series_metadata(series)
+          series_id = find_series_id(series_metadata["a_id"], series_metadata["title"])
           delete_series(series_id)
           collect_series_sermons(series, insert_series(series))
         when :nonexistent
           collect_series_sermons(series, insert_series(series))
         end
+        puts ""
+        puts "#{series_title(series)} took #{Time.at(Time.now - start_time).utc.strftime("%H:%M:%S")}"
+        puts ""
       end
 
       if page != 1
@@ -43,8 +51,12 @@ def main
   end
 end
 
-def find_series_id(a_id)
-  db.exec_params("select id from sermon_series where a_id = $1", [a_id]).getvalue(0,0).to_i
+def current_time
+  Time.now.strftime("%d/%m/%y %H:%M")
+end
+
+def find_series_id(a_id, title)
+  db.exec_params("select id from sermon_series where a_id = $1 or title = $2", [a_id, title]).getvalue(0,0).to_i
 end
 
 def delete_series(series_id)
@@ -79,7 +91,8 @@ def collect_series_sermons(series, series_id)
 end
 
 def series_status(series)
-  series_exists = db.exec_params("select * from sermon_series where a_id = $1", [compile_series_metadata(series)["a_id"]]).ntuples > 0
+  series_metadata = compile_sermon_metadata(series)
+  series_exists = db.exec_params("select * from sermon_series where a_id = $1 or title = $2", [series_metadata["a_id"], series_metadata["title"]]).ntuples > 0
 
   sermons = series.search(".series_links > ul > li")
   sermons_in_database = []
@@ -175,7 +188,7 @@ end
 
 def insert_series(series)
   series_metadata = compile_series_metadata(series)
-  if !db.exec_params("select * from sermon_series where a_id = $1", [series_metadata["a_id"]]).ntuples.zero?
+  if !db.exec_params("select id from sermon_series where a_id = $1 or title = $2", [series_metadata["a_id"], series_metadata["title"]]).ntuples.zero?
     puts "found duplicate"
     return -1
   end
@@ -256,7 +269,7 @@ end
 
 def compile_series_metadata(series)
   metadata = {
-    "a_id" => series.search(".link-buy-series").attr("href").text.split("/").last,
+    "a_id" => !series.search(".link-buy-series").empty? ? series.search(".link-buy-series").attr("href").text.split("/").last : nil,
     "title" => series.search(".title").text,
     "date" => series.search(".date").text,
     "description" => series.search(".description p").text,
