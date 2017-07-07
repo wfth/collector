@@ -166,6 +166,7 @@ def db
         audio_source_url TEXT,
         transcript_key TEXT,
         transcript_source_url TEXT,
+        transcript_text TEXT,
         buy_graphic_key TEXT,
         buy_graphic_source_url TEXT,
         price REAL
@@ -240,10 +241,11 @@ def insert_sermon(sermon, series_id)
                               sermon_metadata["passage"],
                               series_id]).getvalue(0,0)
 
-  transcript_key = upload_transcript(sermon, uuid)
-  if transcript_key
+  transcript_data = upload_transcript(sermon, uuid)
+  if transcript_data
     db.exec_params("update sermons set transcript_source_url = $1 where id = $2", [transcript_source_url(sermon).attr("href"), sermon_id])
-    db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_key.to_s, sermon_id])
+    db.exec_params("update sermons set transcript_key = $1 where id = $2", [transcript_data[:key].to_s, sermon_id])
+    db.exec_params("update sermons set transcript_text = $1 where id  = $2", [transcript_data[:text], sermon_id])
   end
 
   audio_key = upload_audio(sermon, uuid)
@@ -318,10 +320,11 @@ def upload_transcript(sermon, uuid)
 
     tmp_file_path = "/tmp/transcript.pdf"
     transcript.save(tmp_file_path)
+    transcript_text = `ruby extract_text_from_transcript.rb #{tmp_file_path}`
     key = upload_file("sermons/#{uuid}/#{transcript.filename}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
-    return key
+    return {key: key, text: transcript_text}
   end
 end
 
