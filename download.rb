@@ -130,14 +130,16 @@ end
 
 def db
   unless @db
+    database_name = "collector_dev"
+
     initial_connection = PG.connect(user: "postgres", password: "postgres")
 
     begin
-      connection.exec("CREATE DATABASE collector_dev")
-    rescue
+      @db = PG.connect(dbname: 'collector_test', user: "postgres", password: "postgres")
+    rescue PG::ConnectionBad
+      puts "Make sure the database '#{database_name}' exists!"
+      exit(1)
     end
-
-    @db = PG.connect(dbname: 'collector_dev', user: "postgres", password: "postgres")
 
     @db.exec <<-SQL
       create table if not exists sermon_series (
@@ -321,7 +323,7 @@ def upload_transcript(sermon, uuid)
     tmp_file_path = "/tmp/transcript.pdf"
     transcript.save(tmp_file_path)
     transcript_text = `ruby extract_text_from_transcript.rb #{tmp_file_path}`
-    key = upload_file("sermons/#{uuid}/#{transcript.filename}", tmp_file_path)
+    key = upload_file("sermons/#{uuid}/#{transcript.filename.gsub(/%20/, " ")}", tmp_file_path)
     FileUtils.rm(tmp_file_path)
 
     return {key: key, text: transcript_text}
@@ -403,8 +405,8 @@ end
 def upload_file(object_key, file_path)
   s3 = Aws::S3::Resource.new(region: 'us-east-1')
   obj = s3.bucket('wisdomonline-development').object(object_key)
-  obj.acl.put({acl: "public-read"})
   obj_status = obj.upload_file(file_path)
+  obj.acl.put({acl: "public-read"})
 
   return obj.key if obj_status
 end
