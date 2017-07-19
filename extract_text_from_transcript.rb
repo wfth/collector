@@ -11,6 +11,11 @@ def parse_params
   end
 end
 
+def integer_of_attr(tag, attr)
+  return -1 if tag == nil
+  tag.attribute(attr).value.to_i
+end
+
 def main(pdf_doc)
   transcript_xml = %x( pdftohtml -stdout -xml #{pdf_doc} )
   transcript = Nokogiri::XML(transcript_xml)
@@ -18,29 +23,41 @@ def main(pdf_doc)
   plain_text = ""
 
   last_broke = false
-  for t in texts
-    if t.attribute("width").value.to_i < 15 || t.text.length < 2
+  last_line = nil
+  breakable_line_length = 245
+
+  text_enum = texts.to_enum
+  loop do
+    line = text_enum.next
+    new_text = line.text
+    next_line = text_enum.peek
+    next_text = next_line.text
+
+    if integer_of_attr(line, "width") < 15 || line.text.length < 2
       next
     end
 
-    new_text = t.text
-
-    if t.attribute("height").value.to_i > 15
+    if integer_of_attr(line, "height") > 15
       new_text = "<h4>" + new_text + "</h4>"
       plain_text = plain_text + new_text
       last_broke = true
       next
     end
 
-    if t.attribute("width").value.to_i < 240 && last_broke != true
-      plain_text = plain_text + " " + new_text + "</p>\n\n"
-      last_broke = true
-    elsif last_broke
-      plain_text = plain_text + "<p>" + new_text
-      last_broke = false
-    else
-      plain_text = plain_text + " " + new_text
-    end
+    line_indented = integer_of_attr(line, "left") > integer_of_attr(next_line, "left") && integer_of_attr(line, "left") > integer_of_attr(last_line, "left")
+    line_short = integer_of_attr(line, "width") < breakable_line_length
+    next_line_short = integer_of_attr(next_line, "width") < breakable_line_length
+    next_line_has_punctuation = ["!", ".", "?", ",", "-", "'", "\""].include?(next_text.chars.last)
+    should_close_p = (line_short || (next_line_short && !next_line_has_punctuation))
+
+    new_text = "<p>" + new_text if last_broke || line_indented
+    new_text = new_text + "</p>" if should_close_p
+    new_text = " " + new_text if !last_broke
+
+    last_broke = should_close_p
+
+    plain_text = plain_text + new_text
+    last_line = line
   end
 
   puts plain_text + "</p>"
