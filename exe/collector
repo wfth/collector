@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+
+require "collector/cli"
+Collector::CLI.start(ARGV)
