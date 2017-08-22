@@ -17,6 +17,10 @@ module Collector
       @node ||= Nokogiri::XML(to_xml)
     end
 
+    def pages
+      @pages ||= node.css("page").map {|e| Page.new(e)}
+    end
+
     def to_html
       builder = Nokogiri::HTML::Builder.new do |doc|
         doc.html do |html|
@@ -29,26 +33,11 @@ module Collector
     end
 
     def build_html(body)
-
+      pages.each do |page|
+        body.h1 page.title if page.title
+        page.subtitles.each {|e| body.h2 e }
+      end
     end
-
-    # def paragraphs
-    #   unless @paragraphs
-    #     @paragraphs = []
-    #     content_elements = @pages.map {|e| e.content_elements}.flatten
-    #     content_elements.each do |e|
-    #       case e.type
-    #       when :paragraph_start
-    #         @paragraphs <<
-    #       unless @paragraphs.last && @paragraphs.last.
-    #         element = ContentElement.new
-    #         element.accept_text(text)
-    #         elements << element
-    #       end
-    #     end
-    #   end
-    #   @paragraphs
-    # end
 
     class Page
       attr_reader :node, :title, :subtitles, :left_column, :right_column, :texts
@@ -57,6 +46,10 @@ module Collector
         @node = node
         @texts = node.css("text").map {|e| Text.new(e, self)}
         initialize!
+      end
+
+      def inspect
+        "<page##{number}"
       end
 
       def left
@@ -73,6 +66,10 @@ module Collector
 
       def width
         node["width"].to_i
+      end
+
+      def number
+        node["number"].to_i
       end
 
       def initialize!
@@ -104,7 +101,8 @@ module Collector
 
       def consume_title(enum)
         consume_whitespace(enum)
-        @title = consume_matching(enum) {|t| t.bold?}.strip
+        title = consume_matching(enum) {|t| t.bold?}.strip
+        @title = title unless title == ""
       end
 
       def consume_subtitle(enum)
@@ -113,10 +111,13 @@ module Collector
       end
 
       def consume_subtitles(enum)
-        @subtitles = [consume_subtitle(enum)]
-        consume_whitespace(enum)
-        if peek(enum).page_centered?
+        @subtitles = []
+        if node["number"].to_i == 1
           @subtitles << consume_subtitle(enum)
+          consume_whitespace(enum)
+          if peek(enum).page_centered?
+            @subtitles << consume_subtitle(enum)
+          end
         end
       end
 
@@ -207,7 +208,7 @@ module Collector
       end
 
       def accept_text?(text)
-        p [[text.left, text.center, text.right],[text.column.left, text.column.left_indent, text.column.center, text.column.right], @first_type, text.type, text.text]
+        # p [[text.left, text.center, text.right],[text.column.left, text.column.left_indent, text.column.center, text.column.right], @first_type, text.type, text.text]
 
         @texts.empty? ||
         text.type == :footnote_reference ||
@@ -270,7 +271,7 @@ module Collector
       end
 
       def left_justified?
-        left == column.left
+        column && left == column.left
       end
 
       def footnote_reference?
@@ -278,13 +279,13 @@ module Collector
       end
 
       def indented?
-        left == column.left_indent
+        column && left == column.left_indent
       end
 
       # The text is centered in the column if the center of the text overlaps
       # the center of the column.
       def column_centered?
-        (column.center - center).abs <= 4
+        column && (column.center - center).abs <= 4
       end
 
       # The text is centered on the page if the center of the text overlaps the
