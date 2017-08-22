@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+pdftohtml -i -xml -stdout test/fixtures/transcript.pdf

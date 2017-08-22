@@ -1,288 +1,6 @@
 require "nokogiri"
 
 module Collector
-  class TranscriptParser
-
-    module Parser
-      private
-
-      def consume_matching(enum, content="", &block)
-        text = enum.peek rescue nil
-        while text && (block.nil? || block.call(text))
-          content << text.text
-          enum.next
-          text = enum.peek rescue nil
-        end
-        content
-      end
-
-      def consume_whitespace(enum)
-        consume_matching(enum) {|t| t.blank?}
-      end
-
-      def peek(enum)
-        enum.peek rescue Text.new(Nokogiri::XML::Node.new("nil", @node))
-      end
-    end
-
-    class Page
-      include Parser
-
-      attr_reader :node, :title, :subtitles, :columns
-
-      def initialize(node)
-        @node = node
-        parse!
-      end
-
-      def center
-        width/2
-      end
-
-      def width
-        node["width"].to_i
-      end
-
-      private
-
-      def parse!
-        texts = node.css("text").map {|e| Text.new(e, self)}
-        enum = texts.each
-        consume_page_number(enum)
-        @title = consume_title(enum)
-        @subtitles = consume_subtitles(enum)
-        @columns = consume_columns(enum)
-      end
-
-      def consume_page_number(enum)
-        consume_whitespace(enum)
-        consume_matching(enum) {|t| t =~ /\d+/}
-      end
-
-      def consume_title(enum)
-        consume_whitespace(enum)
-        consume_matching(enum) {|t| t.bold?}.strip
-      end
-
-      def consume_subtitle(enum)
-        consume_whitespace(enum)
-        consume_matching(enum) {|t| t.page_centered? && !t.blank?}.strip
-      end
-
-      def consume_subtitles(enum)
-        subtitles = [consume_subtitle(enum)]
-        consume_whitespace(enum)
-        if peek(enum).page_centered?
-          subtitles << consume_subtitle(enum)
-        end
-        subtitles
-      end
-
-      def consume_columns(enum)
-        consume_whitespace(enum)
-        columns = [Column.new(self, 0, center), Column.new(self, center, width)]
-        loop do
-          text = enum.next
-          columns.each {|c| c.accept_text text}
-        end
-        columns
-      end
-    end
-
-    class Column
-      attr_reader :page, :left, :right, :texts
-
-      def initialize(page, left, right)
-        @page = page
-        @left = left
-        @right = right
-        @texts = []
-      end
-
-      def center
-        left + right/2
-      end
-
-      def accept_text(text)
-        if text.left >= left && text.right <= right
-          @texts << text
-          text.column = self
-        end
-      end
-    end
-
-    class Text
-      attr_reader :node, :page
-      attr_accessor :column
-
-      def initialize(node, page)
-        @node = node
-        @page = page
-      end
-
-      def blank?
-        node.text =~ /^\s+$/
-      end
-
-      def bold?
-        (node > "b").any?
-      end
-
-      def left
-        node["left"].to_i
-      end
-
-      def right
-        left + width
-      end
-
-      def width
-        node["width"].to_i
-      end
-
-      def nil?
-        node.name == "nil"
-      end
-
-      # The text is centered in the column if the center of the text overlaps
-      # the center of the column.
-      def column_centered?
-        (column.center - center).abs < 5
-      end
-
-      # The text is centered on the page if the center of the text overlaps the
-      # center of the page.
-      def page_centered?
-        (page.center - center).abs < 5
-      end
-
-      def center
-        left + width/2
-      end
-
-      def italic?
-        (node > "i").any?
-      end
-
-      def text
-        node.text
-      end
-
-      def column_position
-        if column_centered?
-          :center
-        else
-          :unknown
-        end
-      end
-
-      def font_weight
-        bold? ? :bold : :normal
-      end
-
-      def type
-        case [column_position, font_weight]
-        when [:center, :bold]
-          :section_heading
-        when [:indented, :normal]
-          :paragraph_start
-        when [:left, :normal]
-          :paragraph
-        end
-      end
-
-      def =~(r)
-        text =~ r
-      end
-
-      def inspect
-        "<text: '#{text}'>"
-      end
-    end
-
-    class Content
-      attr_reader :type
-
-      def initialize
-        @texts = []
-      end
-
-      def compatible_text?(text)
-        type.nil? || type == text.type
-      end
-
-      def <<(text)
-        if compatible_text?(text)
-          @type ||= text.type
-          @texts << text
-        else
-          raise "Incompatible text #{text.type.inspect}, expected #{type.inspect}"
-        end
-      end
-    end
-
-    def initialize(converter)
-      @c = converter
-    end
-
-    def parse(xml)
-      content = Content.new # content may span two pages
-      pages = xml.css("page").map {|e| Page.new(e)}
-      pages.each do |page|
-        page.title
-        page.subtitles
-        page.columns.each do |column|
-          enum = column.texts.each
-          consume_whitespace(enum)
-          consume_page_number(enum)
-          loop do
-            # consume_whitespace(enum)
-            text = enum.next
-            unless content.compatible_text?(text)
-              @c.send(content.type, content)
-              content = Content.new
-            end
-            content << text
-          end
-        end
-      end
-    end
-
-    private
-
-    def build_html(builder)
-      paragraph = Paragraph.new
-      node.css("page").each_with_index do |page, page_number|
-        texts = node.css("text").map {|n| Text.new(n)}
-        enum = texts.each
-        consume_whitespace(enum)
-        consume_page_number(enum)
-        if page_number == 0
-          build_title(enum, builder)
-          build_subtitles(enum, builder)
-        end
-        loop do
-          consume_whitespace(enum)
-          text = enum.next
-          case text.type
-          when :section_heading
-          when :paragraph_start
-          end
-        end
-      end
-    end
-  end
-
-  class TranscriptHTML
-    def start_page(page)
-
-    end
-
-    def end_page(page)
-
-    end
-  end
-
   class Transcript
     attr_reader :path
     attr_writer :xml
@@ -310,54 +28,335 @@ module Collector
       builder.doc.to_xhtml(indent:2)
     end
 
-    def to_html1
-      html = ""
-      texts = transcript_xml.css("text")
+    def build_html(body)
 
-      last_broke = false
-      last_line = nil
-      breakable_line_length = 245
+    end
 
-      text_enum = texts.to_enum
-      loop do
-        line = text_enum.next
-        new_text = line.text
-        next_line = text_enum.peek
-        next_text = next_line.text
+    # def paragraphs
+    #   unless @paragraphs
+    #     @paragraphs = []
+    #     content_elements = @pages.map {|e| e.content_elements}.flatten
+    #     content_elements.each do |e|
+    #       case e.type
+    #       when :paragraph_start
+    #         @paragraphs <<
+    #       unless @paragraphs.last && @paragraphs.last.
+    #         element = ContentElement.new
+    #         element.accept_text(text)
+    #         elements << element
+    #       end
+    #     end
+    #   end
+    #   @paragraphs
+    # end
 
-        if integer_of_attr(line, "width") < 15 || line.text.length < 2
-          next
-        end
+    class Page
+      attr_reader :node, :title, :subtitles, :left_column, :right_column, :texts
 
-        if integer_of_attr(line, "height") > 15
-          new_text = "<h4>" + new_text + "</h4>"
-          html = html + new_text
-          last_broke = true
-          next
-        end
-
-        line_indented = integer_of_attr(line, "left") > integer_of_attr(next_line, "left") && integer_of_attr(line, "left") > integer_of_attr(last_line, "left")
-        line_short = integer_of_attr(line, "width") < breakable_line_length
-        next_line_short = integer_of_attr(next_line, "width") < breakable_line_length
-        next_line_has_punctuation = ["!", ".", "?", ",", "-", "'", "\""].include?(next_text.chars.last)
-        should_close_p = (line_short || (next_line_short && !next_line_has_punctuation))
-
-        new_text = "<p>" + new_text if last_broke || line_indented
-        new_text = new_text + "</p>" if should_close_p
-        new_text = " " + new_text if !last_broke
-
-        last_broke = should_close_p
-
-        html = html + new_text
-        last_line = line
+      def initialize(node)
+        @node = node
+        @texts = node.css("text").map {|e| Text.new(e, self)}
+        initialize!
       end
 
-      html + "</p>"
+      def left
+        node["left"].to_i
+      end
+
+      def right
+        width
+      end
+
+      def center
+        width/2
+      end
+
+      def width
+        node["width"].to_i
+      end
+
+      def initialize!
+        enum = texts.each
+        consume_page_number(enum)
+        consume_title(enum)
+        consume_subtitles(enum)
+        consume_columns(enum)
+      end
+
+      def consume_matching(enum, content="", &block)
+        text = enum.peek rescue nil
+        while text && (block.nil? || block.call(text))
+          content << text.text
+          enum.next
+          text = enum.peek rescue nil
+        end
+        content
+      end
+
+      def consume_whitespace(enum)
+        consume_matching(enum) {|t| t.whitespace?}
+      end
+
+      def consume_page_number(enum)
+        consume_whitespace(enum)
+        consume_matching(enum) {|t| t =~ /\d+/}
+      end
+
+      def consume_title(enum)
+        consume_whitespace(enum)
+        @title = consume_matching(enum) {|t| t.bold?}.strip
+      end
+
+      def consume_subtitle(enum)
+        consume_whitespace(enum)
+        consume_matching(enum) {|t| t.page_centered? && !t.whitespace?}.strip
+      end
+
+      def consume_subtitles(enum)
+        @subtitles = [consume_subtitle(enum)]
+        consume_whitespace(enum)
+        if peek(enum).page_centered?
+          @subtitles << consume_subtitle(enum)
+        end
+      end
+
+      def consume_columns(enum)
+        consume_whitespace(enum)
+
+        @left_column = begin
+          left = texts.map {|e| e.left}.min
+          right = texts.select {|e| (e.left + e.width) < center }.map {|e| e.left + e.width}.max
+          Column.new(self, left, right)
+        end
+
+        @right_column = begin
+          left = texts.select {|e| e.left > center}.map {|e| e.left}.min
+          right = texts.map {|e| e.left + e.width}.max
+          Column.new(self, left, right)
+        end
+
+        @columns = [@left_column, @right_column]
+
+        loop do
+          text = enum.next
+          @columns.each {|c| c.accept_text text}
+        end
+      end
+
+      def peek(enum)
+        enum.peek rescue Text.new(Nokogiri::XML::Node.new("nil", @node))
+      end
     end
 
-    def integer_of_attr(tag, attr)
-      return -1 if tag == nil
-      tag.attribute(attr).value.to_i
+    class Column
+      attr_reader :page, :left, :right, :texts
+
+      def initialize(page, left, right)
+        @page = page
+        @left = left
+        @right = right
+        @texts = []
+      end
+
+      def center
+        left + (right-left)/2
+      end
+
+      def left_indent
+        @left_indent ||= @texts.map {|e| e.left}.uniq.sort[1].to_i
+      end
+
+      # Answers text if accepted, nil if not
+      def accept_text(text)
+        if text.left >= left && text.right <= right
+          text.column = self
+          @texts << text
+        end
+      end
+
+      def content_elements
+        @content_elements ||= @texts.inject([]) do |elements, text|
+          unless elements.last && elements.last.accept_text(text)
+            element = ContentElement.new
+            element.accept_text(text)
+            elements << element
+          end
+          elements
+        end
+      end
     end
+
+    class ContentElement
+      attr_reader :texts
+
+      def initialize
+        @texts = []
+      end
+
+      # Answers text if accepted, nil if not
+      def accept_text(text)
+        if accept_text?(text)
+          @first_type ||= text.type
+          @first_top ||= text.top
+          @texts << text
+        end
+      end
+
+      def text
+        texts.map {|t| t.text}.join.strip
+      end
+
+      def accept_text?(text)
+        p [[text.left, text.center, text.right],[text.column.left, text.column.left_indent, text.column.center, text.column.right], @first_type, text.type, text.text]
+
+        @texts.empty? ||
+        text.type == :footnote_reference ||
+        text.type == :whitespace ||
+        text.top == @first_top ||
+          case [@first_type, text.type]
+          when [:block_quote, :block_quote] then true
+          when [:paragraph_start, :paragraph] then true
+          when [:paragraph, :paragraph] then true
+          when [:section_heading, :section_heading] then true
+          else
+            false
+          end
+      end
+    end
+
+    class Text
+      attr_reader :node, :page
+      attr_accessor :column
+
+      def initialize(node, page)
+        @node = node
+        @page = page
+      end
+
+      def whitespace?
+        node.text =~ /^\s+$/
+      end
+
+      def bold?
+        (node > "b").any?
+      end
+
+      def italic?
+        (node > "i").any?
+      end
+
+      def left
+        node["left"].to_i
+      end
+
+      def right
+        left + width
+      end
+
+      def height
+        node["height"].to_i
+      end
+
+      def width
+        node["width"].to_i
+      end
+
+      def top
+        node["top"].to_i
+      end
+
+      def nil?
+        node.name == "nil"
+      end
+
+      def left_justified?
+        left == column.left
+      end
+
+      def footnote_reference?
+        height < 10 && italic?
+      end
+
+      def indented?
+        left == column.left_indent
+      end
+
+      # The text is centered in the column if the center of the text overlaps
+      # the center of the column.
+      def column_centered?
+        (column.center - center).abs <= 4
+      end
+
+      # The text is centered on the page if the center of the text overlaps the
+      # center of the page.
+      def page_centered?
+        (page.center - center).abs <= 4
+      end
+
+      def center
+        left + width/2
+      end
+
+      def text
+        node.text
+      end
+
+      def column_position
+        if left_justified?
+          :left
+        elsif indented?
+          :indented
+        elsif column_centered?
+          :center
+        else
+          :unknown
+        end
+      end
+
+      def font_weight
+        case [bold?, italic?]
+        when [true, true]
+          :bold_italic
+        when [true, false]
+          :bold
+        when [false, true]
+          :italic
+        else
+          :normal
+        end
+      end
+
+      def type
+        if footnote_reference?
+          :footnote_reference
+        elsif whitespace?
+          :whitespace
+        else
+          case [column_position, font_weight]
+          when [:center, :bold]
+            :section_heading
+          when [:indented, :normal]
+            :paragraph_start
+          when [:indented, :bold_italic]
+            :block_quote
+          when [:indented, :italic]
+            :block_quote
+          when [:left, :normal]
+            :paragraph
+          else
+            :unknown
+          end
+        end
+      end
+
+      def =~(r)
+        text =~ r
+      end
+
+      def inspect
+        "<#{type}: '#{text}'>"
+      end
+    end
+
   end
 end
