@@ -36,6 +36,9 @@ module Collector
       pages.each do |page|
         body.h1 page.title if page.title
         page.subtitles.each {|e| body.h2 e }
+        page.content_elements.each do |element|
+          body.p element.text
+        end
       end
     end
 
@@ -70,6 +73,20 @@ module Collector
 
       def number
         node["number"].to_i
+      end
+
+      def content_elements
+        @content_elements ||= begin
+          left_elements = left_column.content_elements.map {|e| ContentElement.new(e.texts)}
+          right_elements = right_column.content_elements.map {|e| ContentElement.new(e.texts)}
+          last_element = left_elements.last
+          next_element = right_elements.first
+          if next_element.continuation?(last_element)
+            next_element.texts.each {|e| last_element.accept_text(e)}
+            right_elements = right_elements[1..-1]
+          end
+          [left_elements, right_elements].flatten
+        end
       end
 
       def initialize!
@@ -190,15 +207,20 @@ module Collector
     class ContentElement
       attr_reader :texts
 
-      def initialize
-        @texts = []
+      def initialize(texts=[])
+        @texts = texts
+        initialize!(texts.first) unless texts.empty?
+      end
+
+      def initialize!(text)
+        @first_type ||= text.type
+        @first_top ||= text.top
       end
 
       # Answers text if accepted, nil if not
       def accept_text(text)
         if accept_text?(text)
-          @first_type ||= text.type
-          @first_top ||= text.top
+          initialize!(text) if @texts.empty?
           @texts << text
         end
       end
@@ -208,7 +230,7 @@ module Collector
       end
 
       def accept_text?(text)
-        # p [[text.left, text.center, text.right],[text.column.left, text.column.left_indent, text.column.center, text.column.right], @first_type, text.type, text.text]
+        p [[text.left, text.center, text.right],[text.column.left, text.column.left_indent, text.column.center, text.column.right], @first_type, text.type, text.text]
 
         @texts.empty? ||
         text.type == :footnote_reference ||
@@ -222,6 +244,10 @@ module Collector
           else
             false
           end
+      end
+
+      def continuation?(preceding)
+        texts.all? {|e| preceding.accept_text?(e)}
       end
     end
 
