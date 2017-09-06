@@ -11,16 +11,15 @@ module Collector::Transcript
       @columns = [@left_column, @right_column]
 
       # TODO must iterate the text nodes in the Document, and build a tree
-      current_container = self
-      node.css("text").each do |n|
-        container = self
-        container = @left_column if (n["left"].to_i + n["width"].to_i) <= @left_column.right
-        container = @right_column if n["left"].to_i >= @right_column.left
-        if
-        Text.new(self, container, n)
-      end
-
-      process_text!
+      # current_container = self
+      # node.css("text").each do |n|
+      #   container = self
+      #   container = @left_column if (n["left"].to_i + n["width"].to_i) <= @left_column.right
+      #   container = @right_column if n["left"].to_i >= @right_column.left
+      #   Text.new(self, container, n)
+      # end
+      #
+      # process_text!
     end
 
     def append_text(text)
