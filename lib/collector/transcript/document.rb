@@ -7,6 +7,7 @@ module Collector::Transcript
 
   class Parser
     attr_reader :content, :state
+
     private :state
 
     def initialize(document, page_nodes)
@@ -28,95 +29,156 @@ module Collector::Transcript
       end
     end
 
-    def transition(state, capture=false)
-      capture(@state) if capture
+    def transition(state, texts=nil, text=nil, info=nil)
       @state = state
       @states << state
+      if texts && text && info
+        __send__ state, texts, text, info
+      end
     end
 
-    def unknown
-      transition :unknown, true
+    def unknown!(text)
+      raise <<-MESSAGE
+      \nProcessing failed: #{@states.inspect}
+      #{text_info(text)} #{text_position(text)} #{text.text.inspect}
+      Accumulator: #{@accumulator.map {|e| e.text}.join.inspect}
+      Content: #{@content.map(&:first).inspect}
+      MESSAGE
     end
 
     def parse!
       transition :start
       pages = @page_nodes.to_enum
       loop do
+        transition :new_page unless @state == :start
         page = pages.next
         texts = page.css("text").to_enum
         loop do
           text = texts.next
-          case state
-          when :start
-            case text_info(text)
-            when [:whitespace]
-            when [:numeric]
-              # ignore page number
-            when [:text, :bold, :column_left], [:text, :bold]
-              transition :title
-              append text
-            else
-              unknown
-            end
-          when :title
-            case text_info(text)
-            when [:whitespace]
-              transition :subtitle, true
-            when [:text, :bold, :column_right], [:text, :bold]
-              append text
-            else
-              unknown
-            end
-          when :subtitle
-            case text_info(text)
-            when [:whitespace]
-              ptext = texts.peek
-              if @document.center?(text_position(ptext))
-                transition :subtitle, true
-              else
-                transition :body, true
-              end
-            when [:text, :normal, :document_center]
-              append text
-            else
-              unknown
-            end
-          when :body
-            case text_info(text)
-            when [:text, :bold, EitherColumn, :center]
-              transition :heading
-              append text
-            when [:text, :normal, EitherColumn, :indented]
-              capture :paragraph
-              append text
-            when [:text, :normal, EitherColumn]
-              append text
-            else
-              unknown
-            end
-          when :heading
-            case text_info(text)
-            when [:text, :bold, EitherColumn, :center]
-              append text
-            when [:text, :normal]
-              transition :body, true
-              append text
-            else
-              unknown
-            end
-          when :unknown
-            raise <<-MESSAGE
-
-            Processing failed: #{@states.inspect}
-            #{text_info(text)} #{text_position(text)} #{text.text.inspect}
-            Accumulator: #{@accumulator.inspect}
-            Content: #{@content.map(&:first).inspect}
-            MESSAGE
-          else
-            states << (state = :unknown)
-          end
+          info = text_info(text)
+          # p [state, text_position(text), info, text.text]
+          __send__ state, texts, text, info
         end
       end
+    end
+
+    def start(texts, text, info)
+      case info
+      when [:whitespace]
+      when [:numeric]
+      when [:text, :bold, :column_left]
+        transition :title, texts, text, info
+      else
+        unknown! text
+      end
+    end
+
+    def new_page(texts, text, info)
+      case info
+      when [:whitespace]
+      when [:numeric]
+      else
+        transition :body, texts, text, info
+      end
+    end
+
+    def body(texts, text, info)
+      case info
+      when [:whitespace]
+      when [:text, :bold, EitherColumn, :center]
+        transition :heading, texts, text, info
+      when [:text, :bold, EitherColumn, :left_aligned]
+        capture :paragraph
+        append text
+        capture :subheading
+      when [:text, :normal, EitherColumn, :indented]
+        capture :paragraph
+        append text
+      when [:text, :normal, EitherColumn, :left_aligned]
+        append text
+      when [:text, :italic, EitherColumn, :indented]
+        capture :paragraph
+        transition :blockquote, texts, text, info
+      when [:text, :bold_italic, EitherColumn, :indented]
+        capture :paragraph
+        transition :scripture, texts, text, info
+      else
+        unknown! text
+      end
+    end
+
+    def title(texts, text, info)
+      case info
+      when [:whitespace]
+        capture :title
+        transition :subtitle
+      when [:text, :bold, EitherColumn], [:text, :bold]
+        append text
+      else
+        unknown! text
+      end
+    end
+
+    def subtitle(texts, text, info)
+      case info
+      when [:whitespace]
+        capture :subtitle
+        ptext = texts.peek
+        unless @document.center?(text_position(ptext))
+          transition :body
+        end
+      when [:text, :normal, :document_center]
+        append text
+      else
+        unknown! text
+      end
+    end
+
+    def heading(texts, text, info)
+      case info
+      when [:text, :bold, EitherColumn, :center]
+        append text
+      when [:text, :normal, EitherColumn, :indented]
+        capture :heading
+        transition :body, texts, text, info
+      else
+        unknown! text
+      end
+    end
+
+    def scripture(texts, text, info)
+      case info
+      when [:text, :bold_italic, EitherColumn, :indented]
+        append text
+      when [:text, :normal, EitherColumn, :indented]
+        capture :scripture
+        transition :body, texts, text, info
+      else
+        unknown! text
+      end
+    end
+
+    def blockquote(texts, text, info)
+      case info
+      when [:text, :italic, EitherColumn, :indented]
+        append text
+      when [:text, :italic, EitherColumn]
+        ptext = texts.peek
+        if text_info(ptext) === [:whitespace]
+          capture :blockquote
+          append text
+          capture :reference
+          transition :body
+        else
+          unknown! text
+        end
+      else
+        unknown! text
+      end
+    end
+
+    def method_missing(method, *args)
+      unknown! args[1]
     end
 
     def text_info(text)
@@ -130,7 +192,7 @@ module Collector::Transcript
       else
         info << :text
 
-        info << case [(text > "b").any?, (text > "i").any?]
+        info << case [text.search("b").any?, text.search("i").any?]
         when [true, true] then :bold_italic
         when [true, false] then :bold
         when [false, true] then :italic
@@ -142,17 +204,25 @@ module Collector::Transcript
           info << :document_center
         elsif @document.column_left?(position)
           info << :column_left
-          if @document.column_left_indented?(position)
+          if @document.column_left_margin_aligned?(position)
+            info << :left_aligned
+          elsif @document.column_left_indented?(position)
             info << :indented
           elsif @document.column_left_center?(position)
             info << :center
           end
         elsif @document.column_right?(position)
           info << :column_right
-          info << :center if @document.column_right_center?(position)
+          if @document.column_right_margin_aligned?(position)
+            info << :left_aligned
+          elsif @document.column_right_indented?(position)
+            info << :indented
+          elsif @document.column_right_center?(position)
+            info << :center
+          end
         end
       end
-      p [position, info, text.text]
+
       info
     end
 
@@ -176,10 +246,6 @@ module Collector::Transcript
       left_column[0] <= position[0] && left_column[2] >= position[2]
     end
 
-    def column_right?(position)
-      right_column[0] <= position[0] && right_column[2] >= position[2]
-    end
-
     def column_left_indented?(position)
       position[0] == left_column_tab_stop
     end
@@ -188,8 +254,24 @@ module Collector::Transcript
       (left_column[1] - position[1]).abs <= 4
     end
 
+    def column_left_margin_aligned?(position)
+      left_column[0] == position[0]
+    end
+
+    def column_right?(position)
+      right_column[0] <= position[0] && right_column[2] >= position[2]
+    end
+
+    def column_right_indented?(position)
+      position[0] == right_column_tab_stop
+    end
+
     def column_right_center?(position)
       (right_column[1] - position[1]).abs <= 4
+    end
+
+    def column_right_margin_aligned?(position)
+      right_column[0] == position[0]
     end
 
     def center?(position)
@@ -236,6 +318,13 @@ module Collector::Transcript
         right = width - right_margin
         center = left + ((right - left)/2)
         [left, center, right]
+      end
+    end
+
+    def right_column_tab_stop
+      @right_column_tab_stop ||= begin
+        right_texts = @text_nodes.select {|e| e["left"].to_i > center}
+        right_texts.map {|e| e["left"].to_i }.uniq.sort[1]
       end
     end
 
